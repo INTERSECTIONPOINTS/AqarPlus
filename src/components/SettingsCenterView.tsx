@@ -567,12 +567,13 @@ export function SettingsCenterView({ initialSection = 'hub' }: { initialSection?
   const loadStorageStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/storage/status');
-      if (res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
         const data = (await res.json()) as StorageStatusData;
         setStorageStatus(data);
       }
     } catch {
-      // ignore transient network errors
+      // ignore transient network errors or static hosting
     }
   }, []);
 
@@ -1048,7 +1049,7 @@ export function SettingsCenterView({ initialSection = 'hub' }: { initialSection?
               <div className="flex items-center gap-4 min-w-0">
                 <div className="w-11 h-11 rounded-xl bg-white/95 border border-slate-200 dark:border-white/15 flex items-center justify-center shrink-0 overflow-hidden p-1.5">
                   <img
-                    src="/assets/aistudio/Aqar_plus_8de53ba4.svg"
+                    src="./assets/aistudio/Aqar_plus_8de53ba4.svg"
                     alt="AqarPlus"
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-contain"

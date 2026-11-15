@@ -214,7 +214,7 @@ export function LayoutShell({ children }: LayoutShellProps) {
                 />
               ) : (
                 <img
-                  src="/assets/aistudio/Aqar_plus_8de53ba4.svg"
+                  src="./assets/aistudio/Aqar_plus_8de53ba4.svg"
                   alt="AqarPlus"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-contain p-1"
@@ -287,7 +287,7 @@ export function LayoutShell({ children }: LayoutShellProps) {
                 />
               ) : (
                 <img
-                  src="/assets/aistudio/Aqar_plus_8de53ba4.svg"
+                  src="./assets/aistudio/Aqar_plus_8de53ba4.svg"
                   alt="AqarPlus"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-contain p-1"

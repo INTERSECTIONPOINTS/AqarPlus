@@ -13,6 +13,7 @@ import {
   formatCurrency,
   setDisplayFormatPrefs,
 } from '../utils/formatters';
+import { applyStaticModeMutation } from '../utils/staticModeFallback';
 import { SyncBatchUploadResult, SyncEngine } from '../utils/syncEngine';
 
 export interface ActiveSessionInfo {
@@ -200,6 +201,7 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
     setActiveNavState('tenants');
   }, []);
   const [wsStatus, setWsStatus] = useState<'connected' | 'connecting' | 'offline'>('connecting');
+  const [isStaticMode, setIsStaticMode] = useState(false);
   const [isOfflineSimulated, setIsOfflineSimulated] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [lastSyncResult, setLastSyncResult] = useState<SyncBatchUploadResult | null>(null);
@@ -217,6 +219,8 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   const activeUserIdRef = useRef(activeUserId);
   activeUserIdRef.current = activeUserId;
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const inFlightKeysRef = useRef<Set<string>>(new Set());
 
   const cacheStateSnapshot = useCallback((nextState: AqarDatabaseState) => {
@@ -344,12 +348,45 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/state', {
         headers: { 'x-user-id': uid },
       });
-      if (!res.ok) throw new Error('Failed to fetch state');
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        throw new Error('Static host or backend unavailable');
+      }
       const data = await res.json();
+      setIsStaticMode(false);
       cacheStateSnapshot(data.state);
       if (data.presence) setPresence(data.presence);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Static hosting (e.g. GitHub Pages) or offline startup fallback: hydrate from cache or bundled seed
+      setIsStaticMode(true);
+      setWsStatus('offline');
+      let hydrated = stateRef.current;
+      if (!hydrated) {
+        try {
+          const cached = localStorage.getItem(CACHED_STATE_KEY);
+          if (cached) hydrated = JSON.parse(cached) as AqarDatabaseState;
+        } catch {
+          // ignore malformed cache
+        }
+      }
+      if (!hydrated) {
+        const { createInitialSeed } = await import('../../server/seed');
+        hydrated = createInitialSeed();
+      }
+      cacheStateSnapshot(hydrated);
+      const userObj = hydrated.users.find((u) => u.id === uid) || hydrated.users[0];
+      if (userObj) {
+        setPresence([
+          {
+            sessionId: 'static-browser',
+            userId: userObj.id,
+            nameAr: userObj.nameAr,
+            roleLabelAr: userObj.roleLabelAr,
+            deviceName: 'Browser (Local Mode)',
+            connectedAt: new Date().toISOString(),
+          },
+        ]);
+      }
     } finally {
       setLoading(false);
     }
@@ -365,7 +402,7 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
 
   // WebSocket live connection
   useEffect(() => {
-    if (isOfflineSimulated) {
+    if (isOfflineSimulated || isStaticMode) {
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -437,7 +474,7 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [isOfflineSimulated, pushToast, openOnboarding, cacheStateSnapshot]);
+  }, [isOfflineSimulated, isStaticMode, pushToast, openOnboarding, cacheStateSnapshot]);
 
   // Identify updated role on WS when switching users
   useEffect(() => {
@@ -570,6 +607,18 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
 
       const deviceName = currentUser?.deviceName || 'Web Terminal';
 
+      if (isStaticMode && stateRef.current) {
+        const localResult = applyStaticModeMutation(
+          stateRef.current,
+          activeUserIdRef.current,
+          method,
+          endpoint,
+          body
+        );
+        cacheStateSnapshot(localResult.state);
+        return localResult as T;
+      }
+
       if (isOfflineSimulated || !navigator.onLine) {
         if (method === 'DELETE') {
           pushToast('error', lang === 'ar' ? 'الحذف يتطلب اتصالاً مباشراً بالخادم' : 'Delete requires live server connection');
@@ -610,6 +659,19 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
           },
           body: body !== undefined ? JSON.stringify(body) : undefined,
         });
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json') && stateRef.current) {
+          setIsStaticMode(true);
+          const localResult = applyStaticModeMutation(
+            stateRef.current,
+            activeUserIdRef.current,
+            method,
+            endpoint,
+            body
+          );
+          cacheStateSnapshot(localResult.state);
+          return localResult as T;
+        }
         const data = await res.json();
         if (!res.ok) {
           pushToast('error', data.error || 'تعذر تنفيذ العملية');
@@ -625,7 +687,7 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
         setPendingMutationsCount((c) => Math.max(0, c - 1));
       }
     },
-    [currentUser, isOfflineSimulated, lang, pushToast, cacheStateSnapshot]
+    [currentUser, isOfflineSimulated, isStaticMode, lang, pushToast, cacheStateSnapshot]
   );
 
   const value = useMemo<AqarContextValue>(

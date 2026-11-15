@@ -280,7 +280,7 @@ export function AboutAppView() {
             />
             <div className="relative w-32 h-32 sm:w-36 sm:h-36 rounded-[2rem] shadow-[0_24px_48px_-12px_rgba(0,0,0,0.65)] ring-1 ring-white/25 overflow-hidden bg-white/95 p-4 flex items-center justify-center transition-transform duration-300 group-hover:scale-[1.03]">
               <img
-                src="/assets/aistudio/Aqar_plus_8de53ba4.svg"
+                src="./assets/aistudio/Aqar_plus_8de53ba4.svg"
                 alt="AqarPlus Logo"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-contain"
@@ -401,7 +401,7 @@ export function AboutAppView() {
               />
             ) : (
               <img
-                src="/assets/aistudio/Aqar_plus_8de53ba4.svg"
+                src="./assets/aistudio/Aqar_plus_8de53ba4.svg"
                 alt={companyAffiliationName}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-contain"

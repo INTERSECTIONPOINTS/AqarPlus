@@ -32,7 +32,7 @@ function AqarWorkspace() {
           <div className="flex items-center gap-3 pb-3 border-b border-slate-200 dark:border-white/10">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#26478D] to-[#0A0E1A] text-white flex items-center justify-center font-bold text-sm shrink-0 overflow-hidden border border-white/15">
               <img
-                src="/assets/aistudio/Aqar_plus_8de53ba4.svg"
+                src="./assets/aistudio/Aqar_plus_8de53ba4.svg"
                 alt="AqarPlus"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-contain p-1"
@@ -56,7 +56,7 @@ function AqarWorkspace() {
             <div className="flex items-center gap-3">
               <div className="lg:hidden w-8 h-8 rounded-lg bg-gradient-to-br from-[#26478D] to-[#0A0E1A] text-white flex items-center justify-center font-bold text-xs overflow-hidden border border-white/15">
                 <img
-                  src="/assets/aistudio/Aqar_plus_8de53ba4.svg"
+                  src="./assets/aistudio/Aqar_plus_8de53ba4.svg"
                   alt="AqarPlus"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-contain p-1"

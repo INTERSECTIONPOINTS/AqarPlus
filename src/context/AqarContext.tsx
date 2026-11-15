@@ -9,7 +9,9 @@ import {
 import {
   convertCurrency,
   DEFAULT_CURRENCY_RATES_TO_SAR,
+  DisplayFormatPrefs,
   formatCurrency,
+  setDisplayFormatPrefs,
 } from '../utils/formatters';
 import { SyncBatchUploadResult, SyncEngine } from '../utils/syncEngine';
 
@@ -73,6 +75,7 @@ interface AqarContextValue {
   baseCurrency: CurrencyCode;
   setBaseCurrency: (currency: CurrencyCode) => void;
   currencyRates: Record<CurrencyCode, number>;
+  displayPrefs: DisplayFormatPrefs;
   convertToBase: (amount: number, fromCurrency?: CurrencyCode) => number;
   formatInCurrency: (amount: number, currency?: CurrencyCode) => string;
   formatConvertedBase: (amount: number, fromCurrency?: CurrencyCode) => string;
@@ -282,6 +285,28 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
     }),
     [state?.settings?.currencyRatesToSar]
   );
+
+  const displayPrefs = useMemo<DisplayFormatPrefs>(() => {
+    const calCfg = state?.settings?.calendarConfig;
+    const genCfg = state?.settings?.generalPrefs;
+    const calType: DisplayFormatPrefs['calendarType'] =
+      calCfg?.calendarType ||
+      genCfg?.calendar ||
+      (state?.settings?.dateCalendar === 'ميلادي فقط' ? 'gregorian' : 'both');
+    const dateFmt: DisplayFormatPrefs['dateFormat'] =
+      calCfg?.dateFormat || genCfg?.dateFormat || 'DD/MM/YYYY';
+    const numerals: DisplayFormatPrefs['numerals'] =
+      calCfg?.numerals || genCfg?.numeralFormat || 'en';
+    return setDisplayFormatPrefs({
+      calendarType: calType,
+      dateFormat: dateFmt,
+      numerals,
+    });
+  }, [
+    state?.settings?.calendarConfig,
+    state?.settings?.generalPrefs,
+    state?.settings?.dateCalendar,
+  ]);
 
   const convertToBase = useCallback(
     (amount: number, fromCurrency: CurrencyCode = 'SAR') => {
@@ -624,6 +649,7 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
       baseCurrency,
       setBaseCurrency,
       currencyRates,
+      displayPrefs,
       convertToBase,
       formatInCurrency,
       formatConvertedBase,
@@ -670,6 +696,7 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
       baseCurrency,
       setBaseCurrency,
       currencyRates,
+      displayPrefs,
       convertToBase,
       formatInCurrency,
       formatConvertedBase,

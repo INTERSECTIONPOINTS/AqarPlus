@@ -27,7 +27,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useAqar } from '../context/AqarContext';
-import { exportToCsv, formatCurrency, formatGregorian } from '../utils/formatters';
+import { exportToCsv, formatCurrency, formatDisplayDate } from '../utils/formatters';
 import { triggerHaptic } from '../utils/haptics';
 import { AdvancedReportBuilder } from './AdvancedReportBuilder';
 
@@ -358,7 +358,7 @@ export function ReportsCenterView() {
         </div>
         <div style="font-size:11px;color:#475569;text-align:end;">
           <div>الرقم الضريبي: ${esc(state.settings.vatNumber)}</div>
-          <div>تاريخ التصدير: ${formatGregorian(new Date().toISOString().slice(0, 10), lang)}</div>
+          <div>تاريخ التصدير: ${formatDisplayDate(new Date().toISOString().slice(0, 10), lang)}</div>
         </div>
       </div>
       <table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>

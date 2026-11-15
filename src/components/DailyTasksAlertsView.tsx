@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useAqar } from '../context/AqarContext';
 import { Installment, LeaseContract, PaymentMethod, TaskItem, TicketPriority } from '../types/aqar';
-import { formatSar, formatGregorian } from '../utils/formatters';
+import { formatSar, formatDisplayDate } from '../utils/formatters';
 import { triggerHaptic } from '../utils/haptics';
 
 type DailyHubTab = 'tasks' | 'payments' | 'contracts';
@@ -982,7 +982,7 @@ export function DailyTasksAlertsView() {
                         </span>
                       </div>
                       <div className="text-slate-500 dark:text-slate-400">
-                        {prop?.nameAr} · {unit?.unitNumber} · استحق في {formatGregorian(inst.dueDate, lang)}
+                        {prop?.nameAr} · {unit?.unitNumber} · استحق في {formatDisplayDate(inst.dueDate, lang)}
                       </div>
                       <div className="font-mono-num font-bold text-red-600 dark:text-red-300">
                         المتبقي: {formatSar(inst.remainingAmount, lang)}
@@ -1046,7 +1046,7 @@ export function DailyTasksAlertsView() {
                         </span>
                       </div>
                       <div className="text-slate-500">
-                        {prop?.nameAr} · {unit?.unitNumber} · {formatGregorian(inst.dueDate, lang)}
+                        {prop?.nameAr} · {unit?.unitNumber} · {formatDisplayDate(inst.dueDate, lang)}
                       </div>
                       <div className="font-mono-num font-bold">{formatSar(inst.remainingAmount, lang)}</div>
                     </div>
@@ -1155,7 +1155,7 @@ export function DailyTasksAlertsView() {
                           {contract.internalNumber} · {tenant?.nameAr}
                         </div>
                         <div className="text-slate-500">
-                          {prop?.nameAr} · {unit?.unitNumber} · ينتهي {formatGregorian(contract.endDate, lang)}
+                          {prop?.nameAr} · {unit?.unitNumber} · ينتهي {formatDisplayDate(contract.endDate, lang)}
                         </div>
                       </div>
                       <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono-num font-bold">
@@ -1218,7 +1218,7 @@ export function DailyTasksAlertsView() {
                           {contract.internalNumber} · {tenant?.nameAr}
                         </div>
                         <div className="text-slate-500 dark:text-slate-400">
-                          {prop?.nameAr} · {unit?.unitNumber} · انتهى {formatGregorian(contract.endDate, lang)}
+                          {prop?.nameAr} · {unit?.unitNumber} · انتهى {formatDisplayDate(contract.endDate, lang)}
                         </div>
                       </div>
                       <span className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-mono-num font-bold">

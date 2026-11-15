@@ -14,7 +14,7 @@ import {
   ArrowUpLeft,
 } from 'lucide-react';
 import { NavSection, useAqar } from '../context/AqarContext';
-import { formatGregorian, formatSar } from '../utils/formatters';
+import { formatDisplayDate, formatSar } from '../utils/formatters';
 
 export type AlertCategory = 'all' | 'rent' | 'contracts' | 'maintenance';
 export type AlertPriority = 'عاجل' | 'عادي' | 'منخفض';
@@ -107,8 +107,8 @@ export function useDashboardAlerts() {
             : `Upcoming Rent Due in ${diffDays}d · Unit ${unit?.unitNumber || ''}`,
           detailAr: `${tenant?.nameAr || 'مستأجر'} · المتبقي ${formatSar(inst.remainingAmount, 'ar')} (قسط #${inst.installmentNumber})`,
           detailEn: `${tenant?.nameEn || 'Tenant'} · Remaining ${formatSar(inst.remainingAmount, 'en')} (Inst #${inst.installmentNumber})`,
-          metaAr: `${prop?.nameAr || ''} · تاريخ الاستحقاق ${formatGregorian(inst.dueDate, 'ar')}`,
-          metaEn: `${prop?.nameEn || ''} · Due ${formatGregorian(inst.dueDate, 'en')}`,
+          metaAr: `${prop?.nameAr || ''} · تاريخ الاستحقاق ${formatDisplayDate(inst.dueDate, 'ar')}`,
+          metaEn: `${prop?.nameEn || ''} · Due ${formatDisplayDate(inst.dueDate, 'en')}`,
           targetNav: 'finance',
           actionLabelAr: 'تحصيل الدفعة',
           actionLabelEn: 'Collect Rent',

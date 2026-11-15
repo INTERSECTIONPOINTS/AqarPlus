@@ -67,7 +67,7 @@ import { triggerHaptic } from '../utils/haptics';
 import { AboutAppView } from './AboutAppView';
 import { CommunicationTemplatesView } from './CommunicationTemplatesView';
 import { PIN_STORAGE_KEY } from './OnboardingJourney';
-import { CatalogSettingsSectionId, SettingsCatalogSections } from './SettingsCatalogSections';
+import { CatalogSettingsSectionId, DEFAULT_CALENDAR_CONFIG, SettingsCatalogSections } from './SettingsCatalogSections';
 import { BottomSheetSelect, GlassToggle, RippleButton } from './SettingsUiPrimitives';
 
 type SettingsSectionId =
@@ -1512,9 +1512,17 @@ export function SettingsCenterView({ initialSection = 'hub' }: { initialSection?
                 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
                 if ((prefersDark && theme !== 'dark') || (!prefersDark && theme !== 'light')) toggleTheme();
               }
+              const nextCalCfg = {
+                ...(draft.calendarConfig || state.settings.calendarConfig || DEFAULT_CALENDAR_CONFIG),
+                calendarType: gp.calendar,
+                dateFormat: gp.dateFormat,
+                numerals: gp.numeralFormat,
+              };
+              setDraft((prev) => ({ ...prev, calendarConfig: nextCalCfg }));
               await savePartialSettings(
                 {
                   generalPrefs: { ...gp, currency: 'SAR' },
+                  calendarConfig: nextCalCfg,
                   baseCurrency: 'SAR',
                   dateCalendar: gp.calendar === 'gregorian' ? 'ميلادي فقط' : 'هجري وميلادي',
                 },

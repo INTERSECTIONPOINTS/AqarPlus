@@ -33,7 +33,7 @@ import {
   FormsCustomizationConfig,
   LiabilityRecordItem,
 } from '../types/aqar';
-import { exportToCsv, formatSar } from '../utils/formatters';
+import { exportToCsv, formatDisplayDate, formatSar, localizeDigits } from '../utils/formatters';
 import { triggerHaptic } from '../utils/haptics';
 import { BottomSheetSelect, GlassToggle, RippleButton } from './SettingsUiPrimitives';
 
@@ -632,14 +632,53 @@ export function SettingsCatalogSections({
 
   /* -------------------- SECTION 4: CALENDAR SETTINGS -------------------- */
   if (section === 'calendar') {
-    const updateCal = (patch: Partial<CalendarSettingsConfig>) => {
-      setDraft((prev) => ({ ...prev, calendarConfig: { ...calendarCfg, ...patch } }));
+    const syncCalendarPayload = (nextCal: CalendarSettingsConfig) => ({
+      calendarConfig: nextCal,
+      dateCalendar: (nextCal.calendarType === 'gregorian' ? 'ميلادي فقط' : 'هجري وميلادي') as CompanySettings['dateCalendar'],
+      generalPrefs: {
+        ...(draft.generalPrefs || state.settings.generalPrefs || {
+          language: lang,
+          rtlAuto: true,
+          currency: 'SAR' as const,
+          calendar: nextCal.calendarType,
+          dateFormat: nextCal.dateFormat,
+          numeralFormat: nextCal.numerals,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Riyadh',
+          themeMode: 'dark' as const,
+        }),
+        calendar: nextCal.calendarType,
+        dateFormat: nextCal.dateFormat,
+        numeralFormat: nextCal.numerals,
+      },
+    });
+
+    const updateCal = (patch: Partial<CalendarSettingsConfig>, autoApply = false) => {
+      const nextCal = { ...calendarCfg, ...patch };
+      const payload = syncCalendarPayload(nextCal);
+      setDraft((prev) => ({ ...prev, ...payload }));
+      if (autoApply) {
+        savePartialSettings(payload, 'تم تطبيق إعدادات التقويم والتنسيق');
+      }
     };
+
+    const previewNow = new Date().toISOString();
+    const previewDate = formatDisplayDate(previewNow, lang, {
+      calendarType: calendarCfg.calendarType,
+      dateFormat: calendarCfg.dateFormat,
+      numerals: calendarCfg.numerals,
+      verboseHijri: true,
+    });
+    const previewNumber = localizeDigits('12,450.00', calendarCfg.numerals);
 
     return (
       <>
         <SectionSubHeader
-          onSave={() => savePartialSettings({ calendarConfig: calendarCfg }, 'تم حفظ إعدادات التقويم والعطلات وساعات العمل')}
+          onSave={() =>
+            savePartialSettings(
+              syncCalendarPayload(calendarCfg),
+              'تم حفظ إعدادات التقويم والعطلات وساعات العمل'
+            )
+          }
         />
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-6 p-5 rounded-2xl border border-slate-200 dark:border-white/10 glass-surface space-y-4">
@@ -652,7 +691,7 @@ export function SettingsCatalogSections({
                 { value: 'hijri', label: 'هجري فقط' },
                 { value: 'both', label: 'عرض الاثنين معاً (هجري وميلادي)' },
               ]}
-              onChange={(v) => updateCal({ calendarType: v })}
+              onChange={(v) => updateCal({ calendarType: v }, true)}
             />
             <BottomSheetSelect
               label="تنسيق التاريخ"
@@ -661,7 +700,7 @@ export function SettingsCatalogSections({
                 { value: 'DD/MM/YYYY', label: 'يوم/شهر/سنة (DD/MM/YYYY)' },
                 { value: 'YYYY-MM-DD', label: 'سنة-شهر-يوم (YYYY-MM-DD)' },
               ]}
-              onChange={(v) => updateCal({ dateFormat: v })}
+              onChange={(v) => updateCal({ dateFormat: v }, true)}
             />
             <div className="grid grid-cols-2 gap-3">
               <BottomSheetSelect
@@ -671,7 +710,7 @@ export function SettingsCatalogSections({
                   { value: 'en', label: 'إنجليزية (123)' },
                   { value: 'ar', label: 'عربية (١٢٣)' },
                 ]}
-                onChange={(v) => updateCal({ numerals: v })}
+                onChange={(v) => updateCal({ numerals: v }, true)}
               />
               <BottomSheetSelect
                 label="بداية الأسبوع"
@@ -681,8 +720,20 @@ export function SettingsCatalogSections({
                   { value: 'sun', label: 'الأحد' },
                   { value: 'mon', label: 'الإثنين' },
                 ]}
-                onChange={(v) => updateCal({ weekStart: v })}
+                onChange={(v) => updateCal({ weekStart: v }, true)}
               />
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-white/[0.04] border border-slate-200 dark:border-white/10 space-y-1.5 text-xs">
+              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                معاينة التنسيق المطبق الآن في النظام:
+              </div>
+              <div className="font-mono-num font-bold text-[#26478D] dark:text-blue-400">
+                {previewDate}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono-num">
+                نموذج المبالغ والأرقام: {previewNumber} ر.س
+              </div>
             </div>
 
             <div className="pt-2 border-t border-slate-200/70 dark:border-white/10 space-y-3">

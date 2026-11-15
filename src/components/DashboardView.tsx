@@ -26,7 +26,6 @@ import {
   useDashboardAlerts,
 } from './DashboardAlertsOverlay';
 import { PropertyAnalyticsPanel } from './PropertyAnalyticsPanel';
-import { PrintViewButton } from './PrintViewButton';
 
 const DISMISSED_ALERTS_KEY = 'aqarplus_dismissed_alerts_v1';
 
@@ -208,7 +207,6 @@ export function DashboardView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 no-print">
-          <PrintViewButton />
           <button
             onClick={() => openAlerts('all')}
             className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${

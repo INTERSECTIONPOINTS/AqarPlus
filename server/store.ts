@@ -15,6 +15,7 @@ import {
   DocumentRecord,
   ExecutiveDecision,
   Expense,
+  FavoriteReportPreset,
   HandoverInspection,
   Installment,
   JournalEntry,
@@ -49,6 +50,7 @@ import {
   SavedArchiveFilter,
   ScheduledReportConfig,
   SecurityPolicy,
+  SharedSearchFilter,
   StaffNotificationPrefs,
   StaffSecurityConfig,
   StaffStatusState,
@@ -300,6 +302,8 @@ export class AqarStore {
                 ? parsed.meterReadings
                 : seed.meterReadings,
             scheduledReports: Array.isArray(parsed.scheduledReports) ? parsed.scheduledReports : [],
+            favoriteReports: Array.isArray(parsed.favoriteReports) ? parsed.favoriteReports : [],
+            sharedSearchFilters: Array.isArray(parsed.sharedSearchFilters) ? parsed.sharedSearchFilters : [],
             zatcaInvoices: Array.isArray(parsed.zatcaInvoices) ? parsed.zatcaInvoices : [],
             syncRevision: typeof parsed.syncRevision === 'number' ? parsed.syncRevision : 1,
           };
@@ -1981,8 +1985,17 @@ export class AqarStore {
 
   public toggleRolePermission(userId: string, role: RoleKey, permission: PermissionKey, deviceName?: string): Record<RoleKey, PermissionKey[]> {
     const user = this.assertPermission(userId, 'manage_users');
-    if (role === 'gm' && permission === 'manage_users') {
-      throw new Error('لا يمكن سحب صلاحية إدارة المستخدمين من المدير العام');
+    if (user.role !== 'sys_owner' && user.role !== 'gm') {
+      throw new Error('تعديل مصفوفة الصلاحيات متاح لمالك النظام أو مدير الشركة فقط');
+    }
+    if (user.role === role) {
+      throw new Error('لا يمكن لأي مستخدم تعديل صلاحيات دوره الحالي لضمان الحوكمة');
+    }
+    if (user.role === 'gm' && (role === 'sys_owner' || role === 'gm')) {
+      throw new Error('يستطيع مدير الشركة تعديل صلاحيات الموظفين التابعين له فقط');
+    }
+    if (role === 'sys_owner' && permission === 'manage_users') {
+      throw new Error('لا يمكن سحب صلاحية إدارة المستخدمين من مالك النظام');
     }
     const list = this.state.rolePermissions[role] || [];
     if (list.includes(permission)) {
@@ -2042,7 +2055,12 @@ export class AqarStore {
     return snap;
   }
 
-  public restoreBackup(userId: string, backupId: string, deviceName?: string): AqarDatabaseState {
+  public restoreBackup(
+    userId: string,
+    backupId: string,
+    deviceName?: string,
+    mode: 'replace' | 'merge' = 'replace'
+  ): AqarDatabaseState {
     const user = this.assertPermission(userId, 'backup_restore');
     const filePath = path.join(BACKUP_DIR, `${backupId}.json`);
     if (!fs.existsSync(filePath)) {
@@ -2051,11 +2069,44 @@ export class AqarStore {
     const raw = fs.readFileSync(filePath, 'utf-8');
     const restored = JSON.parse(raw) as AqarDatabaseState;
     const currentBackups = this.state.backups;
-    this.state = restored;
-    this.state.backups = currentBackups;
-    this.addAudit(user, 'استعادة نسخة احتياطية', 'Backup', backupId, `تمت استعادة النظام والتحقق من سلامة البيانات`, {
-      deviceName,
-    });
+
+    if (mode === 'merge') {
+      const mergeArrays = <T extends { id: string }>(current: T[] = [], incoming: T[] = []): T[] => {
+        const ids = new Set(current.map((x) => x.id));
+        return [...current, ...incoming.filter((x) => !ids.has(x.id))];
+      };
+      this.state.properties = mergeArrays(this.state.properties, restored.properties);
+      this.state.units = mergeArrays(this.state.units, restored.units);
+      this.state.tenants = mergeArrays(this.state.tenants, restored.tenants);
+      this.state.contracts = mergeArrays(this.state.contracts, restored.contracts);
+      this.state.installments = mergeArrays(this.state.installments, restored.installments);
+      this.state.payments = mergeArrays(this.state.payments, restored.payments);
+      this.state.expenses = mergeArrays(this.state.expenses, restored.expenses);
+      this.state.tickets = mergeArrays(this.state.tickets, restored.tickets);
+      this.state.tasks = mergeArrays(this.state.tasks, restored.tasks);
+      this.state.documents = mergeArrays(this.state.documents, restored.documents);
+      this.state.vendors = mergeArrays(this.state.vendors, restored.vendors);
+      this.state.owners = mergeArrays(this.state.owners, restored.owners);
+      this.addAudit(
+        user,
+        'دمج ذكي من نسخة احتياطية',
+        'Backup',
+        backupId,
+        'تم دمج السجلات الجديدة من النسخة الاحتياطية مع الإبقاء على البيانات الحالية',
+        { deviceName }
+      );
+    } else {
+      this.state = restored;
+      this.state.backups = currentBackups;
+      this.addAudit(
+        user,
+        'استعادة نسخة احتياطية (استبدال كامل)',
+        'Backup',
+        backupId,
+        'تمت استعادة النظام واستبدال الحالة الحالية بالنسخة المختارة',
+        { deviceName }
+      );
+    }
     this.persist();
     return this.state;
   }
@@ -3581,6 +3632,9 @@ export class AqarStore {
     deviceName?: string
   ): StaffUser {
     const actor = this.assertPermission(userId, 'manage_users');
+    if (actor.role !== 'sys_owner') {
+      throw new Error('إنشاء المستخدمين الجدد صلاحية حصرية لمالك النظام (System Owner) فقط');
+    }
     if (!input.nameAr?.trim() || !input.phone?.trim()) {
       throw new Error('الاسم الكامل ورقم الجوال مطلوبان لإضافة الموظف');
     }
@@ -3644,6 +3698,35 @@ export class AqarStore {
     return newUser;
   }
 
+  public deleteStaffUser(userId: string, targetUserId: string, deviceName?: string): { deletedId: string } {
+    const actor = this.assertPermission(userId, 'manage_users');
+    if (actor.role !== 'sys_owner') {
+      throw new Error('حذف المستخدمين صلاحية حصرية لمالك النظام (System Owner) فقط');
+    }
+    if (actor.id === targetUserId) {
+      throw new Error('لا يمكن حذف حسابك الحالي');
+    }
+    const target = this.state.users.find((u) => u.id === targetUserId);
+    if (!target) throw new Error('الموظف غير موجود');
+    if (target.role === 'sys_owner') {
+      const ownerCount = this.state.users.filter((u) => u.role === 'sys_owner').length;
+      if (ownerCount <= 1) {
+        throw new Error('لا يمكن حذف مالك النظام الوحيد');
+      }
+    }
+    this.state.users = this.state.users.filter((u) => u.id !== targetUserId);
+    this.addAudit(
+      actor,
+      'حذف حساب مستخدم',
+      'StaffUser',
+      targetUserId,
+      `حذف حساب المستخدم ${target.nameAr} (${target.roleLabelAr}) بواسطة مالك النظام`,
+      { oldValue: target.roleLabelAr, deviceName }
+    );
+    this.persist();
+    return { deletedId: targetUserId };
+  }
+
   public updateStaffUser(
     userId: string,
     targetUserId: string,
@@ -3668,18 +3751,38 @@ export class AqarStore {
     deviceName?: string
   ): StaffUser {
     const actor = this.getActingUser(userId);
+    const target = this.state.users.find((u) => u.id === targetUserId);
+    if (!target) throw new Error('الموظف غير موجود');
+
+    const touchesPermissionsOrGovernance =
+      patch.role !== undefined ||
+      patch.active !== undefined ||
+      patch.allowedPropertyIds !== undefined ||
+      patch.customModulePermissions !== undefined ||
+      patch.approvalLimitSar !== undefined;
+
+    if (actor.id === targetUserId && touchesPermissionsOrGovernance) {
+      throw new Error('لا يستطيع أي مستخدم تعديل صلاحياته أو دوره الخاص');
+    }
+
     const isSelfOnlyUpdate =
       actor.id === targetUserId &&
-      !patch.role &&
-      patch.active === undefined &&
-      !patch.allowedPropertyIds &&
-      !patch.customModulePermissions &&
+      !touchesPermissionsOrGovernance &&
       patch.managerRating === undefined;
     if (!isSelfOnlyUpdate) {
       this.assertPermission(userId, 'manage_users');
+      if (actor.role !== 'sys_owner' && actor.role !== 'gm') {
+        throw new Error('تعديل صلاحيات الموظفين متاح لمالك النظام أو مدير الشركة فقط');
+      }
+      if (actor.role === 'gm') {
+        if (target.role === 'sys_owner' || target.role === 'gm') {
+          throw new Error('يستطيع مدير الشركة تعديل صلاحيات الموظفين التابعين له فقط');
+        }
+        if (patch.role === 'sys_owner' || patch.role === 'gm') {
+          throw new Error('لا يملك مدير الشركة صلاحية ترقية مستخدم إلى مدير شركة أو مالك نظام');
+        }
+      }
     }
-    const target = this.state.users.find((u) => u.id === targetUserId);
-    if (!target) throw new Error('الموظف غير موجود');
 
     const oldRole = target.roleLabelAr;
     if (patch.nameAr !== undefined) target.nameAr = patch.nameAr.trim();
@@ -5323,5 +5426,68 @@ export class AqarStore {
     );
     this.persist();
     return record;
+  }
+
+  // 23. Favorite Custom Reports & Shared Compound Search Filters
+  public saveFavoriteReport(
+    userId: string,
+    input: Omit<FavoriteReportPreset, 'id' | 'createdBy' | 'createdAt'>,
+    deviceName?: string
+  ): FavoriteReportPreset {
+    const user = this.getActingUser(userId);
+    if (!this.state.favoriteReports) this.state.favoriteReports = [];
+    const preset: FavoriteReportPreset = {
+      ...input,
+      id: uid('favr'),
+      createdBy: user.id,
+      createdAt: new Date().toISOString(),
+    };
+    this.state.favoriteReports.unshift(preset);
+    this.addAudit(user, 'حفظ تقرير مفضل', 'FavoriteReport', preset.id, `حفظ التقرير المفضل "${preset.title}"`, {
+      deviceName,
+    });
+    this.persist();
+    return preset;
+  }
+
+  public deleteFavoriteReport(userId: string, presetId: string): { deletedId: string } {
+    this.getActingUser(userId);
+    this.state.favoriteReports = (this.state.favoriteReports || []).filter((r) => r.id !== presetId);
+    this.persist();
+    return { deletedId: presetId };
+  }
+
+  public saveSharedSearchFilter(
+    userId: string,
+    input: Omit<SharedSearchFilter, 'id' | 'createdBy' | 'createdByName' | 'createdAt'>,
+    deviceName?: string
+  ): SharedSearchFilter {
+    const user = this.getActingUser(userId);
+    if (!this.state.sharedSearchFilters) this.state.sharedSearchFilters = [];
+    const filter: SharedSearchFilter = {
+      ...input,
+      id: uid('sf'),
+      createdBy: user.id,
+      createdByName: user.nameAr,
+      createdAt: new Date().toISOString(),
+    };
+    this.state.sharedSearchFilters.unshift(filter);
+    this.addAudit(
+      user,
+      filter.isShared ? 'مشاركة فلتر بحث موحد' : 'حفظ فلتر بحث مفضل',
+      'SharedSearchFilter',
+      filter.id,
+      `حفظ الفلتر "${filter.name}"`,
+      { deviceName }
+    );
+    this.persist();
+    return filter;
+  }
+
+  public deleteSharedSearchFilter(userId: string, filterId: string): { deletedId: string } {
+    this.getActingUser(userId);
+    this.state.sharedSearchFilters = (this.state.sharedSearchFilters || []).filter((f) => f.id !== filterId);
+    this.persist();
+    return { deletedId: filterId };
   }
 }

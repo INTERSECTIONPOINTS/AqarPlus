@@ -31,6 +31,7 @@ export interface ToastMessage {
 
 export type PrimaryNavSection =
   | 'dashboard'
+  | 'daily_hub'
   | 'properties'
   | 'leasing_finance'
   | 'tenants'
@@ -178,6 +179,9 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
     if (nav === 'admin') {
       setActiveNavState('reports');
       return;
+    }
+    if (nav === 'settings' && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('aqar:settings-hub'));
     }
     setActiveNavState(nav);
   }, []);

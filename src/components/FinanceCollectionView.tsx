@@ -20,7 +20,6 @@ import { Installment, Payment, PaymentMethod, PaymentType } from '../types/aqar'
 import { formatCurrency, formatDateTime, formatGregorian } from '../utils/formatters';
 import { triggerHaptic } from '../utils/haptics';
 import { exportFinanceReportToExcel } from '../utils/excelExport';
-import { PrintViewButton } from './PrintViewButton';
 import { ReceiptModal } from './ReceiptModal';
 import { QrVerifyModal } from './QrVerifyModal';
 import { SwipeableRow } from './SwipeableRow';
@@ -315,8 +314,6 @@ export function FinanceCollectionView() {
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>{lang === 'ar' ? 'تصدير Excel للمراجعة' : 'Export Excel Report'}</span>
           </button>
-
-          <PrintViewButton />
 
           {hasPermission('collect_payments') && (
             <button

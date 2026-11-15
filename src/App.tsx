@@ -7,6 +7,7 @@ import React from 'react';
 import { AqarProvider, useAqar } from './context/AqarContext';
 import { LayoutShell } from './components/LayoutShell';
 import { DashboardView } from './components/DashboardView';
+import { DailyTasksAlertsView } from './components/DailyTasksAlertsView';
 import { PropertiesUnitsView } from './components/PropertiesUnitsView';
 import { TenantsCrmView } from './components/TenantsCrmView';
 import { LeasingFinanceHubView } from './components/LeasingFinanceHubView';
@@ -123,6 +124,7 @@ function AqarWorkspace() {
     <>
       <LayoutShell>
         {activeNav === 'dashboard' && <DashboardView />}
+        {activeNav === 'daily_hub' && <DailyTasksAlertsView />}
         {activeNav === 'properties' && <PropertiesUnitsView />}
         {activeNav === 'leasing_finance' && <LeasingFinanceHubView />}
         {activeNav === 'tenants' && <TenantsCrmView />}

@@ -9,7 +9,23 @@ import { extractDocumentDataWithGemini } from './server/ocr';
 
 dotenv.config();
 
-const PORT = Number(process.env.PORT) || 3000;
+function resolvePort(): number {
+  const portFlagIdx = process.argv.findIndex((a) => a === '--port' || a === '-p');
+  if (portFlagIdx !== -1 && process.argv[portFlagIdx + 1]) {
+    const parsed = Number(process.argv[portFlagIdx + 1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  const eqFlag = process.argv.find((a) => a.startsWith('--port='));
+  if (eqFlag) {
+    const parsed = Number(eqFlag.split('=')[1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  const envPort = Number(process.env.PORT);
+  if (Number.isFinite(envPort) && envPort > 0 && envPort !== 8080) return envPort;
+  return 3000;
+}
+
+const PORT = resolvePort();
 const store = new AqarStore();
 
 interface ClientSession {
@@ -430,9 +446,10 @@ function handleApi(app: express.Express) {
   app.post('/api/backups/:id/restore', (req: Request, res: Response) => {
     try {
       const { userId, deviceName } = getActor(req);
-      const restored = store.restoreBackup(userId, String(req.params.id), deviceName);
-      broadcastStateChange(userId, `استعادة نسخة احتياطية`);
-      res.json({ ok: true, state: restored });
+      const mode = req.body?.mode === 'merge' ? 'merge' : 'replace';
+      const restored = store.restoreBackup(userId, String(req.params.id), deviceName, mode);
+      broadcastStateChange(userId, `استعادة نسخة احتياطية (${mode === 'merge' ? 'دمج ذكي' : 'استبدال كامل'})`);
+      res.json({ ok: true, mode, state: restored });
     } catch (e: unknown) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -781,6 +798,17 @@ function handleApi(app: express.Express) {
       const user = store.updateStaffUser(userId, String(req.params.id), req.body, deviceName);
       broadcastStateChange(userId, `تحديث ملف الموظف: ${user.nameAr}`);
       res.json({ user, state: store.getStateForUser(userId) });
+    } catch (e: unknown) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  app.delete('/api/team/users/:id', (req: Request, res: Response) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const result = store.deleteStaffUser(userId, String(req.params.id), deviceName);
+      broadcastStateChange(userId, 'حذف حساب مستخدم');
+      res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
       res.status(400).json({ error: (e as Error).message });
     }
@@ -1374,6 +1402,51 @@ function handleApi(app: express.Express) {
       res.status(400).json({ error: (e as Error).message });
     }
   });
+
+  // Favorite Custom Reports & Shared Search Filters
+  app.post('/api/reports/favorites', (req: Request, res: Response) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const preset = store.saveFavoriteReport(userId, req.body, deviceName);
+      broadcastStateChange(userId, `حفظ تقرير مفضل: ${preset.title}`);
+      res.status(201).json({ preset, state: store.getStateForUser(userId) });
+    } catch (e: unknown) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  app.delete('/api/reports/favorites/:id', (req: Request, res: Response) => {
+    try {
+      const { userId } = getActor(req);
+      const result = store.deleteFavoriteReport(userId, String(req.params.id));
+      broadcastStateChange(userId, 'إزالة تقرير مفضل');
+      res.json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e: unknown) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  app.post('/api/search/filters', (req: Request, res: Response) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const filter = store.saveSharedSearchFilter(userId, req.body, deviceName);
+      broadcastStateChange(userId, `حفظ فلتر بحث: ${filter.name}`);
+      res.status(201).json({ filter, state: store.getStateForUser(userId) });
+    } catch (e: unknown) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  app.delete('/api/search/filters/:id', (req: Request, res: Response) => {
+    try {
+      const { userId } = getActor(req);
+      const result = store.deleteSharedSearchFilter(userId, String(req.params.id));
+      broadcastStateChange(userId, 'حذف فلتر بحث');
+      res.json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e: unknown) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
 }
 
 async function startServer() {
@@ -1382,6 +1455,9 @@ async function startServer() {
 
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server, path: '/ws' });
+  wss.on('error', (err) => {
+    console.error('WebSocketServer error:', err.message);
+  });
 
   wss.on('connection', (ws, req) => {
     const sessionId = `ses-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1442,7 +1518,7 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true, hmr: false, ws: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -1453,6 +1529,10 @@ async function startServer() {
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }
+
+  server.on('error', (err) => {
+    console.error('HTTP Server error:', err);
+  });
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`AqarPlus centralized server running on http://0.0.0.0:${PORT}`);

@@ -274,11 +274,11 @@
       "approvalLimitSar": 500000,
       "active": true,
       "deviceName": "Windows Desktop · المكتب الرئيسي",
-      "lastActiveAt": "2026-11-14T22:51:10.954Z",
+      "lastActiveAt": "2026-11-15T18:22:49.206Z",
       "statusState": "متصل",
       "specialty": "الإشراف العام واعتماد المصروفات",
       "managerRating": 5,
-      "lastActivitySummary": "تحديث إعدادات المنشأة والعملة الأساسية (SAR)",
+      "lastActivitySummary": "نسخ احتياطي (3) · أرشيف (6) · مستندات (6)",
       "security": {
         "twoFactorEnabled": true,
         "biometricEnabled": true,
@@ -456,7 +456,7 @@
       "approvalLimitSar": 1000000,
       "active": true,
       "deviceName": "MacBook Pro M3 · الإدارة العليا",
-      "lastActiveAt": "2026-11-15T18:09:46.727Z",
+      "lastActiveAt": "2026-11-15T18:22:47.238Z",
       "statusState": "متصل",
       "specialty": "الحوكمة والأمن والنسخ الاحتياطي",
       "managerRating": 5,
@@ -2645,7 +2645,8 @@
       ],
       "preArchiveStatus": "نشط",
       "archivedBy": "usr-gm",
-      "archiveMode": "يدوي"
+      "archiveMode": "يدوي",
+      "diskPath": "/app/applet/data/documents/doc-1_deed-410109034821.pdf.meta.json"
     },
     {
       "id": "doc-2",
@@ -2659,7 +2660,8 @@
       "expiryDate": "2027-01-14",
       "version": 1,
       "uploadedBy": "usr-lease",
-      "createdAt": "2026-01-14T10:15:00.000Z"
+      "createdAt": "2026-01-14T10:15:00.000Z",
+      "diskPath": "/app/applet/data/documents/doc-2_ejar-EJ-1049283711.pdf.meta.json"
     },
     {
       "id": "doc-3",
@@ -2690,7 +2692,8 @@
           "action": "معاينة",
           "accessedAt": "2026-11-14T19:11:07.292Z"
         }
-      ]
+      ],
+      "diskPath": "/app/applet/data/documents/doc-3_INV-NAS-4410.pdf.meta.json"
     },
     {
       "id": "doc-4",
@@ -2714,7 +2717,8 @@
         "rawText": "بطاقة الهوية الوطنية - الاسم: طارق بن إبراهيم الشهري - رقم الهوية: 1077331199 - تاريخ الانتهاء: 2026-12-05"
       },
       "accessLog": [],
-      "createdAt": "2026-02-01T09:10:00.000Z"
+      "createdAt": "2026-02-01T09:10:00.000Z",
+      "diskPath": "/app/applet/data/documents/doc-4_id-1077331199.jpg.meta.json"
     },
     {
       "id": "doc-arch-1",
@@ -2743,7 +2747,8 @@
       "archiveReason": "انتهاء صلاحية الوثيقة (مشفرة للأغراض القانونية)",
       "archivedBy": "usr-gm",
       "archiveMode": "مجدول",
-      "preArchiveStatus": "نشط"
+      "preArchiveStatus": "نشط",
+      "diskPath": "/app/applet/data/documents/doc-arch-1_id-1055667788-expired.pdf.meta.json"
     },
     {
       "id": "doc-arch-2",
@@ -2772,7 +2777,8 @@
       "archiveReason": "وثيقة عقد منتهي الصلاحية",
       "archivedBy": "usr-lease",
       "archiveMode": "تلقائي",
-      "preArchiveStatus": "نشط"
+      "preArchiveStatus": "نشط",
+      "diskPath": "/app/applet/data/documents/doc-arch-2_ejar-EJ-1046552211.pdf.meta.json"
     }
   ],
   "purchaseOrders": [
@@ -3186,6 +3192,20 @@
   ],
   "auditLogs": [
     {
+      "id": "aud-mwi5wwhi-3i3t6",
+      "userId": "usr-gm",
+      "userName": "فهد بن عبدالرحمن السبيعي",
+      "userRole": "المدير العام",
+      "deviceName": "Windows Desktop · المكتب الرئيسي",
+      "ipAddress": "192.168.10.1",
+      "geoLocation": "الرياض · المملكة العربية السعودية",
+      "action": "مزامنة مجلدات التخزين على القرص",
+      "entityType": "StoragePaths",
+      "entityId": "sync",
+      "summary": "نسخ احتياطي (3) · أرشيف (6) · مستندات (6)",
+      "createdAt": "2026-11-15T18:22:49.206Z"
+    },
+    {
       "id": "aud-mwi5eerq-n69ct",
       "userId": "usr-sys",
       "userName": "عبدالله بن فهد السبيعي",
@@ -3587,6 +3607,30 @@
     "require2faForManagersAndAccountants": true
   },
   "loginHistory": [
+    {
+      "id": "lgn-mwi5wuyu-e7jy3",
+      "userId": "usr-sys",
+      "userName": "عبدالله بن فهد السبيعي",
+      "userRole": "مالك النظام",
+      "deviceName": "MacBook Pro M3 · الإدارة العليا",
+      "ipAddress": "2001:16a2:789e:2100:21ca:3dff:320:3aef",
+      "geoLocation": "الرياض · المملكة العربية السعودية",
+      "method": "كلمة المرور",
+      "success": true,
+      "createdAt": "2026-11-15T18:22:47.238Z"
+    },
+    {
+      "id": "lgn-mwi5t2du-trkgv",
+      "userId": "usr-sys",
+      "userName": "عبدالله بن فهد السبيعي",
+      "userRole": "مالك النظام",
+      "deviceName": "MacBook Pro M3 · الإدارة العليا",
+      "ipAddress": "143.92.161.205",
+      "geoLocation": "الرياض · المملكة العربية السعودية",
+      "method": "كلمة المرور",
+      "success": true,
+      "createdAt": "2026-11-15T18:19:50.226Z"
+    },
     {
       "id": "lgn-mwi5g4pz-gne6a",
       "userId": "usr-sys",
@@ -4155,10 +4199,10 @@
     }
   ],
   "teamSeeded": true,
-  "lastUpdatedAt": "2026-11-15T18:09:46.727Z",
+  "lastUpdatedAt": "2026-11-15T18:22:49.206Z",
   "scheduledReports": [],
   "zatcaInvoices": [],
-  "syncRevision": 10,
+  "syncRevision": 13,
   "favoriteReports": [],
   "sharedSearchFilters": []
 }

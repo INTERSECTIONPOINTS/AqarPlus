@@ -2,7 +2,6 @@ import http from 'http';
 import path from 'path';
 import express, { Request, Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { AqarStore } from './server/store';
 import { extractDocumentDataWithGemini } from './server/ocr';
@@ -1447,9 +1446,39 @@ function handleApi(app: express.Express) {
       res.status(400).json({ error: (e as Error).message });
     }
   });
+
+  // Custom Disk Storage Endpoints (Backups / Archive / Documents)
+  app.get('/api/storage/status', (_req: Request, res: Response) => {
+    try {
+      res.json(store.getStorageStatus());
+    } catch (e: unknown) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  app.post('/api/storage/validate-path', (req: Request, res: Response) => {
+    try {
+      const result = store.validateStorageFolder(String(req.body?.path || ''));
+      res.json(result);
+    } catch (e: unknown) {
+      res.status(400).json({ ok: false, error: (e as Error).message });
+    }
+  });
+
+  app.post('/api/storage/sync-folders', (req: Request, res: Response) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const result = store.syncFoldersToDisk(userId, deviceName);
+      broadcastStateChange(userId, 'مزامنة وتهيئة مجلدات التخزين المحلية على القرص');
+      res.json({ ...result, status: store.getStorageStatus(), state: store.getStateForUser(userId) });
+    } catch (e: unknown) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
 }
 
-async function startServer() {
+export async function startServer(customPort?: number) {
+  const listenPort = customPort && Number.isFinite(customPort) ? customPort : PORT;
   const app = express();
   handleApi(app);
 
@@ -1517,13 +1546,16 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false, ws: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(process.cwd(), 'dist');
+    const distDir = process.env.AQARPLUS_DIST_DIR
+      ? path.resolve(process.env.AQARPLUS_DIST_DIR)
+      : path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distDir, 'index.html'));
@@ -1534,9 +1566,16 @@ async function startServer() {
     console.error('HTTP Server error:', err);
   });
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`AqarPlus centralized server running on http://0.0.0.0:${PORT}`);
+  await new Promise<void>((resolve) => {
+    server.listen(listenPort, '0.0.0.0', () => {
+      console.log(`AqarPlus centralized server running on http://0.0.0.0:${listenPort}`);
+      resolve();
+    });
   });
+
+  return { server, port: listenPort };
 }
 
-startServer();
+if (process.env.AQARPLUS_NO_AUTO_START !== '1') {
+  startServer();
+}

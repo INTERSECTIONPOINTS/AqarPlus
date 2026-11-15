@@ -99,13 +99,19 @@ function currencyLabelAr(currency: CurrencyCode = 'SAR'): string {
   }
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = process.env.AQARPLUS_USER_DATA_DIR
+  ? path.resolve(process.env.AQARPLUS_USER_DATA_DIR)
+  : path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'aqarplus-db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const ARCHIVE_DIR = path.join(DATA_DIR, 'archive');
+const DOCUMENTS_DIR = path.join(DATA_DIR, 'documents');
 
 function ensureDirs() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  if (!fs.existsSync(ARCHIVE_DIR)) fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+  if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
 }
 
 function uid(prefix: string): string {
@@ -1968,6 +1974,8 @@ export class AqarStore {
       uploadedBy: user.id,
       createdAt: new Date().toISOString(),
     };
+    const writtenPath = this.writeDocumentToDisk(doc);
+    if (writtenPath) doc.diskPath = writtenPath;
     this.state.documents.unshift(doc);
     this.addAudit(user, 'أرشفة مستند', 'Document', doc.id, `رفع المستند "${doc.title}" (${doc.category})`, { deviceName });
     this.persist();
@@ -2027,8 +2035,17 @@ export class AqarStore {
     ensureDirs();
     const id = uid('bkp');
     const json = JSON.stringify(this.state, null, 2);
-    const filePath = path.join(BACKUP_DIR, `${id}.json`);
-    fs.writeFileSync(filePath, json, 'utf-8');
+    const defaultPath = path.join(BACKUP_DIR, `${id}.json`);
+    fs.writeFileSync(defaultPath, json, 'utf-8');
+    const targetDir = this.getBackupsDir();
+    if (targetDir !== BACKUP_DIR) {
+      try {
+        fs.mkdirSync(targetDir, { recursive: true });
+        fs.writeFileSync(path.join(targetDir, `${id}.json`), json, 'utf-8');
+      } catch {
+        // Keep local backup even if external/NAS target is unreachable
+      }
+    }
 
     const recordCount =
       this.state.properties.length +
@@ -2062,8 +2079,8 @@ export class AqarStore {
     mode: 'replace' | 'merge' = 'replace'
   ): AqarDatabaseState {
     const user = this.assertPermission(userId, 'backup_restore');
-    const filePath = path.join(BACKUP_DIR, `${backupId}.json`);
-    if (!fs.existsSync(filePath)) {
+    const filePath = this.resolveBackupFile(backupId);
+    if (!filePath) {
       throw new Error('ملف النسخة الاحتياطية غير موجود على الخادم (جرب إنشاء نسخة جديدة أولاً)');
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -3397,6 +3414,7 @@ export class AqarStore {
         newValue: 'مؤرشف',
         deviceName,
       });
+      this.writeArchiveBundleToDisk();
       this.persist();
       return { archivedAt: now, summary };
     });
@@ -4047,8 +4065,8 @@ export class AqarStore {
     templatesCount: number;
     lastUpdatedAt?: string;
   } {
-    const filePath = path.join(BACKUP_DIR, `${backupId}.json`);
-    if (!fs.existsSync(filePath)) {
+    const filePath = this.resolveBackupFile(backupId);
+    if (!filePath) {
       return {
         id: backupId,
         exists: false,
@@ -5489,5 +5507,177 @@ export class AqarStore {
     this.state.sharedSearchFilters = (this.state.sharedSearchFilters || []).filter((f) => f.id !== filterId);
     this.persist();
     return { deletedId: filterId };
+  }
+
+  // ==================== CUSTOM LOCAL / DESKTOP DISK STORAGE ====================
+  private resolveStorageDir(configuredPath: string | undefined, fallbackDir: string): string {
+    const raw = (configuredPath || '').trim();
+    if (!raw) return fallbackDir;
+    // On non-Windows hosts, avoid creating local directories for Windows UNC/drive paths
+    if (process.platform !== 'win32' && (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('\\\\'))) {
+      return fallbackDir;
+    }
+    try {
+      const resolved = path.resolve(raw);
+      if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
+      return resolved;
+    } catch {
+      return fallbackDir;
+    }
+  }
+
+  public getBackupsDir(): string {
+    return this.resolveStorageDir(this.state.settings.backupPolicy?.customPath, BACKUP_DIR);
+  }
+
+  public getArchiveDir(): string {
+    return this.resolveStorageDir(this.state.settings.backupPolicy?.archivePath, ARCHIVE_DIR);
+  }
+
+  public getDocumentsDir(): string {
+    return this.resolveStorageDir(this.state.settings.backupPolicy?.documentsPath, DOCUMENTS_DIR);
+  }
+
+  private resolveBackupFile(backupId: string): string | null {
+    const customCandidate = path.join(this.getBackupsDir(), `${backupId}.json`);
+    if (fs.existsSync(customCandidate)) return customCandidate;
+    const defaultCandidate = path.join(BACKUP_DIR, `${backupId}.json`);
+    if (fs.existsSync(defaultCandidate)) return defaultCandidate;
+    return null;
+  }
+
+  private writeDocumentToDisk(doc: DocumentRecord): string | null {
+    try {
+      const dir = this.getDocumentsDir();
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const safeBase = (doc.fileName || `${doc.id}.json`).replace(/[<>:"/\\|?*]+/g, '_');
+      const targetFile = path.join(dir, `${doc.id}_${safeBase}`);
+      if (doc.dataUrl && doc.dataUrl.includes(';base64,')) {
+        const base64Part = doc.dataUrl.split(';base64,')[1];
+        fs.writeFileSync(targetFile, Buffer.from(base64Part, 'base64'));
+      } else {
+        const metaFile = path.join(dir, `${doc.id}_${safeBase}.meta.json`);
+        fs.writeFileSync(metaFile, JSON.stringify({ id: doc.id, title: doc.title, category: doc.category, fileName: doc.fileName, createdAt: doc.createdAt }, null, 2), 'utf-8');
+        return metaFile;
+      }
+      return targetFile;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeArchiveBundleToDisk(): number {
+    try {
+      const dir = this.getArchiveDir();
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const bundles = {
+        contracts: this.state.contracts.filter((c) => Boolean(c.archivedAt)),
+        tenants: this.state.tenants.filter((t) => Boolean(t.archivedAt)),
+        receipts: this.state.payments.filter((p) => Boolean(p.archivedAt)),
+        tickets: this.state.tickets.filter((t) => Boolean(t.archivedAt)),
+        documents: this.state.documents.filter((d) => Boolean(d.archivedAt)),
+        units: this.state.units.filter((u) => Boolean(u.archivedAt)),
+      };
+      let written = 0;
+      for (const [key, items] of Object.entries(bundles)) {
+        const filePath = path.join(dir, `archive-${key}.json`);
+        fs.writeFileSync(filePath, JSON.stringify({ updatedAt: new Date().toISOString(), count: items.length, items }, null, 2), 'utf-8');
+        written += 1;
+      }
+      return written;
+    } catch {
+      return 0;
+    }
+  }
+
+  public validateStorageFolder(targetPath: string): { ok: boolean; resolvedPath: string; error?: string } {
+    const raw = (targetPath || '').trim();
+    if (!raw) return { ok: false, resolvedPath: '', error: 'يرجى إدخال مسار المجلد أولاً' };
+    if (process.platform !== 'win32' && (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('\\\\'))) {
+      return {
+        ok: true,
+        resolvedPath: raw,
+      };
+    }
+    try {
+      const resolved = path.resolve(raw);
+      if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
+      const probe = path.join(resolved, `.aqarplus-probe-${Date.now()}.tmp`);
+      fs.writeFileSync(probe, 'ok', 'utf-8');
+      fs.unlinkSync(probe);
+      return { ok: true, resolvedPath: resolved };
+    } catch (err) {
+      return { ok: false, resolvedPath: raw, error: (err as Error).message };
+    }
+  }
+
+  public getStorageStatus() {
+    ensureDirs();
+    const backupsDir = this.getBackupsDir();
+    const archiveDir = this.getArchiveDir();
+    const documentsDir = this.getDocumentsDir();
+    const countFiles = (dir: string) => {
+      try {
+        return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
+      } catch {
+        return 0;
+      }
+    };
+    return {
+      dataDir: DATA_DIR,
+      backupsDir,
+      archiveDir,
+      documentsDir,
+      backupsFilesCount: countFiles(backupsDir),
+      archiveFilesCount: countFiles(archiveDir),
+      documentsFilesCount: countFiles(documentsDir),
+      platform: process.platform,
+    };
+  }
+
+  public syncFoldersToDisk(userId: string, deviceName?: string) {
+    const user = this.assertPermission(userId, 'backup_restore');
+    ensureDirs();
+    const backupsDir = this.getBackupsDir();
+    let backupsSynced = 0;
+    try {
+      if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+      for (const bkp of this.state.backups) {
+        const src = path.join(BACKUP_DIR, `${bkp.id}.json`);
+        const dst = path.join(backupsDir, `${bkp.id}.json`);
+        if (fs.existsSync(src) && src !== dst) {
+          fs.copyFileSync(src, dst);
+          backupsSynced += 1;
+        } else if (fs.existsSync(dst)) {
+          backupsSynced += 1;
+        }
+      }
+    } catch {
+      // ignore individual copy errors
+    }
+    const archiveFilesSynced = this.writeArchiveBundleToDisk();
+    let documentsSynced = 0;
+    for (const doc of this.state.documents) {
+      const written = this.writeDocumentToDisk(doc);
+      if (written) {
+        doc.diskPath = written;
+        documentsSynced += 1;
+      }
+    }
+    this.addAudit(
+      user,
+      'مزامنة مجلدات التخزين على القرص',
+      'StoragePaths',
+      'sync',
+      `نسخ احتياطي (${backupsSynced}) · أرشيف (${archiveFilesSynced}) · مستندات (${documentsSynced})`,
+      { deviceName }
+    );
+    this.persist();
+    return {
+      backupsSynced,
+      archiveFilesSynced,
+      documentsSynced,
+      status: this.getStorageStatus(),
+    };
   }
 }

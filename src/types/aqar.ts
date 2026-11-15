@@ -974,6 +974,7 @@ export interface DocumentRecord {
   version: number;
   uploadedBy: string;
   dataUrl?: string;
+  diskPath?: string;
   ocrStatus?: 'لم يُحلل' | 'تم الاستخراج آلياً';
   ocrRawText?: string;
   ocrExtracted?: OcrExtractedData;
@@ -1265,6 +1266,8 @@ export interface BackupPolicyConfig {
   scheduledTime: string;
   storageTarget: 'device' | 'custom_folder' | 'nas' | 'cloud';
   customPath: string;
+  archivePath?: string;
+  documentsPath?: string;
   encryptBackups: boolean;
 }
 

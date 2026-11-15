@@ -17,8 +17,10 @@ import {
   CreditCard,
   DatabaseBackup,
   Download,
+  ExternalLink,
   FileCheck2,
   Fingerprint,
+  FolderOpen,
   Globe,
   HardDrive,
   Home,
@@ -69,6 +71,34 @@ import { CommunicationTemplatesView } from './CommunicationTemplatesView';
 import { PIN_STORAGE_KEY } from './OnboardingJourney';
 import { CatalogSettingsSectionId, DEFAULT_CALENDAR_CONFIG, SettingsCatalogSections } from './SettingsCatalogSections';
 import { BottomSheetSelect, GlassToggle, RippleButton } from './SettingsUiPrimitives';
+
+declare global {
+  interface Window {
+    aqarDesktop?: {
+      isElectron: boolean;
+      platform: string;
+      selectFolder: (defaultPath?: string, title?: string) => Promise<string | null>;
+      openPath: (targetPath: string) => Promise<boolean>;
+      getDefaultPaths: () => Promise<{
+        userData: string;
+        backupsDir: string;
+        archiveDir: string;
+        documentsDir: string;
+      }>;
+    };
+  }
+}
+
+interface StorageStatusData {
+  dataDir: string;
+  backupsDir: string;
+  archiveDir: string;
+  documentsDir: string;
+  backupsFilesCount: number;
+  archiveFilesCount: number;
+  documentsFilesCount: number;
+  platform: string;
+}
 
 type SettingsSectionId =
   | 'hub'
@@ -529,6 +559,28 @@ export function SettingsCenterView({ initialSection = 'hub' }: { initialSection?
   const [backupEncryptPassword, setBackupEncryptPassword] = useState('');
   const [backupPreview, setBackupPreview] = useState<BackupPreviewData | null>(null);
   const [restoreMode, setRestoreMode] = useState<'replace' | 'merge'>('replace');
+
+  const [storageStatus, setStorageStatus] = useState<StorageStatusData | null>(null);
+  const [syncingFolders, setSyncingFolders] = useState(false);
+  const [validatingFolder, setValidatingFolder] = useState<string | null>(null);
+
+  const loadStorageStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/storage/status');
+      if (res.ok) {
+        const data = (await res.json()) as StorageStatusData;
+        setStorageStatus(data);
+      }
+    } catch {
+      // ignore transient network errors
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === 'backup') {
+      void loadStorageStatus();
+    }
+  }, [activeSection, loadStorageStatus]);
 
   const [devModeEnabled, setDevModeEnabled] = useState<boolean>(
     () => typeof window !== 'undefined' && localStorage.getItem('aqarplus_developer_mode_v1') === '1'
@@ -2339,7 +2391,7 @@ export function SettingsCenterView({ initialSection = 'hub' }: { initialSection?
                 value={draft.backupPolicy?.storageTarget || 'nas'}
                 options={[
                   { value: 'device', label: 'ذاكرة الجهاز المحلية' },
-                  { value: 'custom_folder', label: 'مجلد مخصص' },
+                  { value: 'custom_folder', label: 'مجلد مخصص على القرص' },
                   { value: 'nas', label: 'خادم الشركة (NAS)' },
                   { value: 'cloud', label: 'تخزين سحابي خاص (اختياري)' },
                 ]}
@@ -2351,20 +2403,246 @@ export function SettingsCenterView({ initialSection = 'hub' }: { initialSection?
                 }
               />
 
-              <div className="text-xs">
-                <label className="text-[11px] text-slate-500 block mb-1">المسار / المجلد</label>
-                <input
-                  dir="ltr"
-                  value={draft.backupPolicy?.customPath || ''}
-                  onChange={(e) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      backupPolicy: { ...(prev.backupPolicy || state.settings.backupPolicy!), customPath: e.target.value },
-                    }))
-                  }
-                  placeholder="\\NAS-AQAR\Backups\AqarPlus"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num"
-                />
+              {/* Dedicated Custom Disk Paths: Backups, Smart Archive, Documents */}
+              <div className="space-y-3 pt-2 border-t border-slate-200/70 dark:border-white/10">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <HardDrive className="w-3.5 h-3.5 text-[#26478D] dark:text-[#60a5fa]" />
+                      <span>مجلدات الحفظ المحلية على الكمبيوتر</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {window.aqarDesktop?.isElectron
+                        ? 'وضع تطبيق سطح المكتب نشط — يمكنك استعراض أي مجلد على القرص مباشرة'
+                        : 'في المتصفح أدخل المسار الكامل (مثل D:\\AqarPlus\\Backups) أو استخدم زر التصفح داخل تطبيق سطح المكتب (.exe)'}
+                    </p>
+                  </div>
+                  {window.aqarDesktop?.isElectron && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const defaults = await window.aqarDesktop?.getDefaultPaths();
+                        if (!defaults) return;
+                        setDraft((prev) => ({
+                          ...prev,
+                          backupPolicy: {
+                            ...(prev.backupPolicy || state.settings.backupPolicy!),
+                            storageTarget: 'custom_folder',
+                            customPath: defaults.backupsDir,
+                            archivePath: defaults.archiveDir,
+                            documentsPath: defaults.documentsDir,
+                          },
+                        }));
+                        pushToast('info', 'تمت تعبئة المسارات الافتراضية داخل مجلد المستندات');
+                      }}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 cursor-pointer shrink-0"
+                    >
+                      تعبئة افتراضية
+                    </button>
+                  )}
+                </div>
+
+                {(
+                  [
+                    {
+                      key: 'customPath' as const,
+                      label: '1. مجلد النسخ الاحتياطي',
+                      placeholder: 'D:\\AqarPlus\\Backups',
+                      activeDir: storageStatus?.backupsDir,
+                      filesCount: storageStatus?.backupsFilesCount ?? 0,
+                    },
+                    {
+                      key: 'archivePath' as const,
+                      label: '2. مجلد الأرشيف الذكي',
+                      placeholder: 'D:\\AqarPlus\\Archive',
+                      activeDir: storageStatus?.archiveDir,
+                      filesCount: storageStatus?.archiveFilesCount ?? 0,
+                    },
+                    {
+                      key: 'documentsPath' as const,
+                      label: '3. مجلد المستندات والمرفقات',
+                      placeholder: 'D:\\AqarPlus\\Documents',
+                      activeDir: storageStatus?.documentsDir,
+                      filesCount: storageStatus?.documentsFilesCount ?? 0,
+                    },
+                  ] as const
+                ).map((item) => {
+                  const val = draft.backupPolicy?.[item.key] || '';
+                  return (
+                    <div
+                      key={item.key}
+                      className="p-3 rounded-xl border border-slate-200/80 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] space-y-1.5 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                          {item.label}
+                        </label>
+                        {storageStatus && (
+                          <span className="text-[10px] font-mono-num text-emerald-600 dark:text-emerald-400">
+                            {item.filesCount} ملف محفوظ
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          dir="ltr"
+                          value={val}
+                          onChange={(e) =>
+                            setDraft((prev) => ({
+                              ...prev,
+                              backupPolicy: {
+                                ...(prev.backupPolicy || state.settings.backupPolicy!),
+                                storageTarget: 'custom_folder',
+                                [item.key]: e.target.value,
+                              },
+                            }))
+                          }
+                          placeholder={item.placeholder}
+                          className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 font-mono-num text-[11px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (window.aqarDesktop?.selectFolder) {
+                              const selected = await window.aqarDesktop.selectFolder(
+                                val || item.activeDir || undefined,
+                                item.label
+                              );
+                              if (selected) {
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  backupPolicy: {
+                                    ...(prev.backupPolicy || state.settings.backupPolicy!),
+                                    storageTarget: 'custom_folder',
+                                    [item.key]: selected,
+                                  },
+                                }));
+                                pushToast('success', `تم تحديد المسار: ${selected}`);
+                              }
+                              return;
+                            }
+                            const wPicker = window as unknown as {
+                              showDirectoryPicker?: (opts?: { mode?: string }) => Promise<{ name: string }>;
+                            };
+                            if (typeof wPicker.showDirectoryPicker === 'function') {
+                              try {
+                                const handle = await wPicker.showDirectoryPicker({ mode: 'readwrite' });
+                                if (handle?.name) {
+                                  pushToast(
+                                    'info',
+                                    `تم اختيار المجلد "${handle.name}". في المتصفح قد يلزم لصق المسار الكامل (مثل D:\\AqarPlus\\${handle.name})، أو استخدام تطبيق سطح المكتب (.exe) للقراءة التلقائية.`
+                                  );
+                                  if (!val.trim()) {
+                                    setDraft((prev) => ({
+                                      ...prev,
+                                      backupPolicy: {
+                                        ...(prev.backupPolicy || state.settings.backupPolicy!),
+                                        storageTarget: 'custom_folder',
+                                        [item.key]: handle.name,
+                                      },
+                                    }));
+                                  }
+                                }
+                              } catch {
+                                // User cancelled browser picker
+                              }
+                            } else {
+                              pushToast('info', 'أدخل مسار المجلد الكامل مباشرة في الحقل واضغط "تحقق"');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 text-[11px] font-semibold cursor-pointer shrink-0"
+                          title="اختيار مجلد من الجهاز"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5 text-[#26478D] dark:text-[#60a5fa]" />
+                          <span>تصفح</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={validatingFolder === item.key}
+                          onClick={async () => {
+                            const checkPath = (val || item.activeDir || '').trim();
+                            if (!checkPath) {
+                              pushToast('error', 'أدخل مساراً للتحقق منه أولاً');
+                              return;
+                            }
+                            setValidatingFolder(item.key);
+                            try {
+                              const resp = await fetch('/api/storage/validate-path', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ path: checkPath }),
+                              });
+                              const data = await resp.json();
+                              if (data.ok) {
+                                pushToast('success', `المجلد جاهز وقابل للكتابة: ${data.resolvedPath}`);
+                              } else {
+                                pushToast('error', data.error || 'تعذر الوصول للمسار المحدد');
+                              }
+                            } catch {
+                              pushToast('error', 'تعذر التحقق من المسار');
+                            } finally {
+                              setValidatingFolder(null);
+                            }
+                          }}
+                          className="px-2.5 py-2 rounded-xl border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 text-[11px] font-semibold cursor-pointer shrink-0"
+                        >
+                          {validatingFolder === item.key ? '...' : 'تحقق'}
+                        </button>
+                        {window.aqarDesktop?.openPath && (val || item.activeDir) && (
+                          <button
+                            type="button"
+                            onClick={() => void window.aqarDesktop?.openPath(val || item.activeDir || '')}
+                            className="p-2 rounded-xl border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer shrink-0"
+                            title="فتح المجلد في مستكشف الملفات"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      {item.activeDir && (
+                        <div className="text-[10px] text-slate-400 font-mono-num truncate" dir="ltr">
+                          المسار الفعلي الآن: {item.activeDir}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  disabled={syncingFolders}
+                  onClick={async () => {
+                    setSyncingFolders(true);
+                    try {
+                      await mutate(
+                        'PATCH',
+                        '/api/settings',
+                        { backupPolicy: draft.backupPolicy },
+                        { offlineDescAr: 'حفظ مسارات التخزين المحلية' }
+                      );
+                      const syncRes = (await mutate('POST', '/api/storage/sync-folders', {})) as {
+                        backupsSynced?: number;
+                        archiveFilesSynced?: number;
+                        documentsSynced?: number;
+                        status?: StorageStatusData;
+                      } | null;
+                      if (syncRes?.status) setStorageStatus(syncRes.status);
+                      else await loadStorageStatus();
+                      if (syncRes) {
+                        pushToast(
+                          'success',
+                          `تم حفظ المسارات ومزامنة القرص (${syncRes.backupsSynced ?? 0} نسخة · ${syncRes.archiveFilesSynced ?? 0} ملف أرشيف · ${syncRes.documentsSynced ?? 0} مستند)`
+                        );
+                      }
+                    } finally {
+                      setSyncingFolders(false);
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-[#26478D] text-white text-xs font-bold hover:bg-[#1e3a75] transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncingFolders ? 'animate-spin' : ''}`} />
+                  <span>{syncingFolders ? 'جاري حفظ المسارات ومزامنة القرص...' : 'حفظ المسارات ومزامنة الملفات إلى القرص الآن'}</span>
+                </button>
               </div>
 
               <div className="pt-2 border-t border-slate-200/70 dark:border-white/10 space-y-3">

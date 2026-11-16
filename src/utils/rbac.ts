@@ -446,6 +446,484 @@ export function userHasLegacyPermission(
   return perms.includes(permission);
 }
 
+export const ALL_PROPERTIES_SCOPE = '*';
+
+export const ROLE_PRIORITY_RANK: Record<RoleKey, number> = {
+  owner: 0,
+  technician: 1,
+  receptionist: 1,
+  leasing: 2,
+  auditor: 2,
+  maint_manager: 3,
+  accountant: 3,
+  supervisor: 4,
+  gm: 5,
+  sys_owner: 6,
+};
+
+export function isRoleDowngrade(oldRole: RoleKey, newRole: RoleKey): boolean {
+  return (ROLE_PRIORITY_RANK[newRole] ?? 0) < (ROLE_PRIORITY_RANK[oldRole] ?? 0);
+}
+
+export function isUserAccountActive(user: StaffUser | null | undefined): boolean {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== 'نشط') return false;
+  return true;
+}
+
+export function canUserAccessCompany(
+  state: Pick<AqarDatabaseState, 'companies'> | null | undefined,
+  user: StaffUser | null | undefined,
+  companyId?: string | null
+): boolean {
+  if (!isUserAccountActive(user) || !user) return false;
+  if (user.role === 'sys_owner') return true;
+  if (!user.companyId) return true;
+  if (!companyId) return true;
+  if ((state?.companies?.length || 0) <= 1 && !companyId) return true;
+  return user.companyId === companyId;
+}
+
+/**
+ * Computes the strict set of accessible property IDs for a user.
+ * Security rule:
+ * - Inactive/suspended accounts get an empty Set().
+ * - `owner` only gets properties where `ownerShares` matches `user.ownerId`.
+ * - `sys_owner` gets all workspace properties (`'ALL'`).
+ * - `gm` gets company properties if `allowedPropertyIds` is `undefined` or includes `'*'`,
+ *   otherwise strictly the explicitly listed IDs filtered by `companyId` (so `[]` => 0 properties).
+ * - All non-admin employee roles: MUST explicitly have `'*'` (`ALL_PROPERTIES_SCOPE`) in
+ *   `allowedPropertyIds` to access all company properties; `undefined` OR `[]` both yield 0 properties!
+ */
+export function getUserPropertyScope(
+  state: Pick<AqarDatabaseState, 'properties' | 'ownerShares' | 'companies'> | null | undefined,
+  user: StaffUser | null | undefined
+): 'ALL' | Set<string> {
+  if (!isUserAccountActive(user) || !user) return new Set();
+  const allProperties = state?.properties || [];
+
+  const withinCompany = (propId: string): boolean => {
+    const prop = allProperties.find((p) => p.id === propId);
+    if (!prop) return false;
+    return canUserAccessCompany(state, user, prop.companyId);
+  };
+
+  if (user.role === 'owner') {
+    if (!user.ownerId) return new Set();
+    const owned = new Set<string>();
+    for (const p of allProperties) {
+      if (
+        Array.isArray(p.ownerShares) &&
+        p.ownerShares.some((s) => s.ownerId === user.ownerId) &&
+        canUserAccessCompany(state, user, p.companyId)
+      ) {
+        owned.add(p.id);
+      }
+    }
+    for (const s of state?.ownerShares || []) {
+      if (s.ownerId === user.ownerId && withinCompany(s.propertyId)) {
+        owned.add(s.propertyId);
+      }
+    }
+    return owned;
+  }
+
+  if (user.role === 'sys_owner') {
+    return 'ALL';
+  }
+
+  const companyRestricted = Boolean(user.companyId && (state?.companies?.length || 0) > 0);
+  const rawAllowed = user.allowedPropertyIds;
+
+  if (user.role === 'gm') {
+    if (rawAllowed === undefined || (Array.isArray(rawAllowed) && rawAllowed.includes(ALL_PROPERTIES_SCOPE))) {
+      if (!companyRestricted) return 'ALL';
+      return new Set(allProperties.filter((p) => canUserAccessCompany(state, user, p.companyId)).map((p) => p.id));
+    }
+    return new Set(rawAllowed.filter((id) => id !== ALL_PROPERTIES_SCOPE && withinCompany(id)));
+  }
+
+  // Non-admin employee roles: NEVER treat undefined or [] as "all properties"
+  if (!Array.isArray(rawAllowed) || rawAllowed.length === 0) {
+    return new Set();
+  }
+
+  if (rawAllowed.includes(ALL_PROPERTIES_SCOPE)) {
+    if (!companyRestricted) return 'ALL';
+    return new Set(allProperties.filter((p) => canUserAccessCompany(state, user, p.companyId)).map((p) => p.id));
+  }
+
+  return new Set(rawAllowed.filter((id) => id !== ALL_PROPERTIES_SCOPE && withinCompany(id)));
+}
+
+export function getAccessiblePropertyIdsSet(
+  state: Pick<AqarDatabaseState, 'properties' | 'ownerShares' | 'companies'> | null | undefined,
+  user: StaffUser | null | undefined
+): Set<string> {
+  const scope = getUserPropertyScope(state, user);
+  if (scope === 'ALL') {
+    return new Set((state?.properties || []).map((p) => p.id));
+  }
+  return scope;
+}
+
+export function userHasAllPropertiesAccess(
+  state: Pick<AqarDatabaseState, 'properties' | 'ownerShares' | 'companies'> | null | undefined,
+  user: StaffUser | null | undefined
+): boolean {
+  if (!isUserAccountActive(user) || !user) return false;
+  if (user.role === 'sys_owner') return true;
+  if (user.role === 'owner') return false;
+  const scope = getUserPropertyScope(state, user);
+  if (scope === 'ALL') return true;
+  if (user.companyId && Array.isArray(user.allowedPropertyIds) && user.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE)) {
+    return true;
+  }
+  if (user.role === 'gm' && user.allowedPropertyIds === undefined) return true;
+  return false;
+}
+
+export function canUserAccessProperty(
+  state: Pick<AqarDatabaseState, 'properties' | 'ownerShares' | 'companies'> | null | undefined,
+  user: StaffUser | null | undefined,
+  propertyId?: string | null
+): boolean {
+  if (!isUserAccountActive(user) || !user || !propertyId) return false;
+  const scope = getUserPropertyScope(state, user);
+  if (scope === 'ALL') {
+    const prop = (state?.properties || []).find((p) => p.id === propertyId);
+    if (prop) return canUserAccessCompany(state, user, prop.companyId);
+    return true;
+  }
+  return scope.has(propertyId);
+}
+
+export function isPropertyScopeShrink(
+  oldState: Pick<AqarDatabaseState, 'properties' | 'ownerShares' | 'companies'> | null | undefined,
+  oldUser: StaffUser,
+  newState: Pick<AqarDatabaseState, 'properties' | 'ownerShares' | 'companies'> | null | undefined,
+  newUser: StaffUser
+): boolean {
+  const oldScope = getUserPropertyScope(oldState, oldUser);
+  const newScope = getUserPropertyScope(newState, newUser);
+  if (newScope === 'ALL') return false;
+  if (oldScope === 'ALL') {
+    const allIds = (oldState?.properties || []).map((p) => p.id);
+    if (allIds.length === 0) {
+      return !Array.isArray(newUser.allowedPropertyIds) || !newUser.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE);
+    }
+    return allIds.some((id) => !newScope.has(id));
+  }
+  for (const prevId of oldScope) {
+    if (!newScope.has(prevId)) return true;
+  }
+  if (
+    Array.isArray(oldUser.allowedPropertyIds) &&
+    oldUser.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE) &&
+    (!Array.isArray(newUser.allowedPropertyIds) || !newUser.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function sanitizeUserForClient(u: StaffUser): StaffUser {
+  return {
+    id: u.id,
+    companyId: u.companyId,
+    nameAr: u.nameAr,
+    nameEn: u.nameEn,
+    username: u.username,
+    role: u.role,
+    customRoleId: u.customRoleId,
+    jobTitle: u.jobTitle,
+    department: u.department,
+    roleLabelAr: u.roleLabelAr,
+    roleLabelEn: u.roleLabelEn,
+    email: u.email,
+    phone: u.phone,
+    approvalLimitSar: u.approvalLimitSar,
+    active: u.active,
+    accountStatus: u.accountStatus || (u.active ? 'نشط' : 'موقوف'),
+    allowedPropertyIds: Array.isArray(u.allowedPropertyIds) ? [...u.allowedPropertyIds] : undefined,
+    customModulePermissions: u.customModulePermissions ? { ...u.customModulePermissions } : undefined,
+    ownerId: u.ownerId,
+    deviceName: u.deviceName,
+    lastActiveAt: u.lastActiveAt,
+    statusState: u.statusState,
+    specialty: u.specialty,
+    managerRating: u.managerRating,
+    lastActivitySummary: u.lastActivitySummary,
+    security: u.security
+      ? {
+          ...u.security,
+          trustedDevices: u.security.trustedDevices ? [...u.security.trustedDevices] : undefined,
+        }
+      : undefined,
+    notificationPrefs: u.notificationPrefs ? { ...u.notificationPrefs } : undefined,
+    invitedBy: u.invitedBy,
+    invitedAt: u.invitedAt,
+    inviteStatus: u.inviteStatus,
+    terminatedAt: u.terminatedAt,
+    terminationReason: u.terminationReason,
+    verifiedEmail: u.verifiedEmail,
+    verifiedPhone: u.verifiedPhone,
+    online: u.online,
+  };
+}
+
+export function filterStateForUser(
+  state: AqarDatabaseState,
+  user: StaffUser | undefined,
+  options?: { workspaceId?: string }
+): AqarDatabaseState {
+  if (!user || !isUserAccountActive(user)) {
+    return {
+      ...state,
+      properties: [],
+      units: [],
+      tenants: [],
+      leads: [],
+      leadEscalations: [],
+      contracts: [],
+      handovers: [],
+      installments: [],
+      payments: [],
+      expenses: [],
+      supplierInvoices: [],
+      propertyBudgets: [],
+      tickets: [],
+      tasks: [],
+      meterReadings: [],
+      documents: [],
+      owners: [],
+      ownerShares: [],
+      ownerTransfers: [],
+      purchaseOrders: [],
+      decisions: [],
+      zatcaInvoices: [],
+      communications: [],
+      notifications: [],
+      auditLogs: [],
+      backups: [],
+      loginHistory: [],
+      employeeInvitations: [],
+      users: [],
+    };
+  }
+
+  const hasAllProps = userHasAllPropertiesAccess(state, user);
+  const allowedPropIds = getAccessiblePropertyIdsSet(state, user);
+  const canAudit = userHasLegacyPermission(state, user, 'view_audit') || userHasModuleAction(state, user, 'audit', 'view');
+  const canBackup = userHasLegacyPermission(state, user, 'backup_restore') || userHasModuleAction(state, user, 'backups', 'view');
+  const canTeam = userHasLegacyPermission(state, user, 'manage_users') || userHasModuleAction(state, user, 'team', 'view');
+
+  const properties = (state.properties || []).filter((p) => allowedPropIds.has(p.id));
+  const units = (state.units || []).filter((u) => allowedPropIds.has(u.propertyId));
+  const unitIds = new Set(units.map((u) => u.id));
+
+  const contracts = (state.contracts || []).filter((c) => allowedPropIds.has(c.propertyId));
+  const contractIds = new Set(contracts.map((c) => c.id));
+
+  const handovers = (state.handovers || []).filter((h) => allowedPropIds.has(h.propertyId));
+  const handoverIds = new Set(handovers.map((h) => h.id));
+
+  const installments = (state.installments || []).filter((i) => contractIds.has(i.contractId));
+  const payments = (state.payments || []).filter((p) => contractIds.has(p.contractId));
+  const expenses = (state.expenses || []).filter((e) => allowedPropIds.has(e.propertyId));
+  const expenseIds = new Set(expenses.map((e) => e.id));
+
+  const supplierInvoices = (state.supplierInvoices || []).filter((inv) =>
+    inv.propertyId ? allowedPropIds.has(inv.propertyId) : hasAllProps
+  );
+  const propertyBudgets = (state.propertyBudgets || []).filter((b) => allowedPropIds.has(b.propertyId));
+  const tickets = (state.tickets || []).filter((t) => allowedPropIds.has(t.propertyId));
+  const ticketIds = new Set(tickets.map((t) => t.id));
+
+  const tasks = (state.tasks || []).filter((t) =>
+    t.propertyId ? allowedPropIds.has(t.propertyId) : hasAllProps || t.assignedTo === user.id
+  );
+  const leads = (state.leads || []).filter((l) =>
+    l.propertyId ? allowedPropIds.has(l.propertyId) : hasAllProps || l.assignedTo === user.id
+  );
+  const leadIds = new Set(leads.map((l) => l.id));
+  const leadEscalations = (state.leadEscalations || []).filter((e) => leadIds.has(e.leadId));
+  const meterReadings = (state.meterReadings || []).filter((m) => allowedPropIds.has(m.propertyId));
+
+  // Build index of which properties every tenant belongs to (via contracts, units, leads)
+  const tenantAllLinkedPropIds = new Map<string, Set<string>>();
+  const addTenantLink = (tenantId: string | undefined, propertyId: string | undefined) => {
+    if (!tenantId || !propertyId) return;
+    let set = tenantAllLinkedPropIds.get(tenantId);
+    if (!set) {
+      set = new Set<string>();
+      tenantAllLinkedPropIds.set(tenantId, set);
+    }
+    set.add(propertyId);
+  };
+  for (const c of state.contracts || []) addTenantLink(c.tenantId, c.propertyId);
+  for (const u of state.units || []) {
+    const linkedTid = u.currentTenantId || (u as { linkedTenantId?: string }).linkedTenantId;
+    if (linkedTid) addTenantLink(linkedTid, u.propertyId);
+  }
+  for (const l of state.leads || []) {
+    const linkedTid = l.convertedToTenantId || l.convertedTenantId;
+    if (linkedTid && l.propertyId) addTenantLink(linkedTid, l.propertyId);
+  }
+
+  const tenants = (state.tenants || []).filter((t) => {
+    if (user.role === 'owner') {
+      return contracts.some((c) => c.tenantId === t.id);
+    }
+    const linkedProps = tenantAllLinkedPropIds.get(t.id);
+    if (linkedProps && linkedProps.size > 0) {
+      for (const pid of linkedProps) {
+        if (allowedPropIds.has(pid)) return true;
+      }
+      return false;
+    }
+    // Unlinked orphan/new tenant: visible ONLY to users with >=1 accessible property or global scope
+    if (hasAllProps) {
+      return canUserAccessCompany(state, user, (t as any).companyId);
+    }
+    return allowedPropIds.size > 0;
+  });
+  const tenantIds = new Set(tenants.map((t) => t.id));
+
+  const ownerShares =
+    user.role === 'owner'
+      ? (state.ownerShares || []).filter((s) => s.ownerId === user.ownerId && allowedPropIds.has(s.propertyId))
+      : (state.ownerShares || []).filter((s) => allowedPropIds.has(s.propertyId));
+  const visibleOwnerIds = new Set<string>(ownerShares.map((s) => s.ownerId));
+  for (const p of properties) {
+    for (const s of p.ownerShares || []) {
+      if (user.role !== 'owner' || s.ownerId === user.ownerId) {
+        visibleOwnerIds.add(s.ownerId);
+      }
+    }
+  }
+  const owners =
+    user.role === 'owner'
+      ? (state.owners || []).filter((o) => o.id === user.ownerId)
+      : (state.owners || []).filter((o) => visibleOwnerIds.has(o.id) || hasAllProps);
+  const allowedOwnerIds = new Set(owners.map((o) => o.id));
+  const ownerTransfers = (state.ownerTransfers || []).filter((tr) => allowedOwnerIds.has(tr.ownerId));
+
+  const purchaseOrders = (state.purchaseOrders || []).filter((po) =>
+    po.propertyId ? allowedPropIds.has(po.propertyId) : hasAllProps
+  );
+  const decisions = (state.decisions || []).filter((d) =>
+    d.propertyId ? allowedPropIds.has(d.propertyId) : hasAllProps
+  );
+  const zatcaInvoices = (state.zatcaInvoices || []).filter((z) => {
+    if (z.contractId) return contractIds.has(z.contractId);
+    if (z.propertyId) return allowedPropIds.has(z.propertyId);
+    return hasAllProps;
+  });
+  const communications = (state.communications || []).filter((c) =>
+    c.tenantId ? tenantIds.has(c.tenantId) : hasAllProps
+  );
+
+  const documents = (state.documents || []).filter((doc) => {
+    if (doc.propertyId) return allowedPropIds.has(doc.propertyId);
+    const relType = doc.relatedEntityType || (doc as any).relatedType;
+    const relId = doc.relatedEntityId || (doc as any).relatedId;
+    if ((relType === 'Property' || relType === 'عقار') && relId) return allowedPropIds.has(relId);
+    if ((relType === 'Unit' || relType === 'وحدة') && relId) return unitIds.has(relId);
+    if ((relType === 'Contract' || relType === 'عقد') && relId) return contractIds.has(relId);
+    if ((relType === 'Tenant' || relType === 'مستأجر') && relId) return tenantIds.has(relId);
+    if (relType === 'Ticket' && relId) return ticketIds.has(relId);
+    if (relType === 'Expense' && relId) return expenseIds.has(relId);
+    if (relType === 'Handover' && relId) return handoverIds.has(relId);
+    if (relType === 'Owner' && relId) return allowedOwnerIds.has(relId);
+    if (relType === 'شركة') return hasAllProps;
+    return hasAllProps;
+  });
+
+  const companies =
+    user.role === 'sys_owner' || !user.companyId
+      ? state.companies || []
+      : (state.companies || []).filter((c) => c.id === user.companyId);
+
+  const notifications = (state.notifications || []).filter((n) => {
+    if (!n.targetRoles.includes(user.role) && user.role !== 'sys_owner') return false;
+    if (n.propertyId) return allowedPropIds.has(n.propertyId);
+    return true;
+  });
+
+  const sanitizedUsers = (state.users || [])
+    .filter((u) => {
+      if (user.role === 'owner') return u.id === user.id;
+      if (user.role === 'sys_owner') return true;
+      if (user.companyId && u.companyId && user.companyId !== u.companyId) return false;
+      return true;
+    })
+    .map((u) => {
+      if (u.id === user.id || canTeam || canAudit) {
+        return sanitizeUserForClient(u);
+      }
+      // Minimal directory record for non-managers (no PII, credentials, or permission configs)
+      return {
+        id: u.id,
+        companyId: u.companyId,
+        nameAr: u.nameAr,
+        nameEn: u.nameEn,
+        role: u.role,
+        jobTitle: u.jobTitle,
+        department: u.department,
+        roleLabelAr: u.roleLabelAr,
+        roleLabelEn: u.roleLabelEn,
+        email: '',
+        phone: '',
+        approvalLimitSar: 0,
+        active: u.active,
+        accountStatus: u.accountStatus || (u.active ? 'نشط' : 'موقوف'),
+        lastActiveAt: u.lastActiveAt,
+        statusState: u.statusState,
+        specialty: u.specialty,
+        online: u.online,
+      } as StaffUser;
+    });
+
+  return {
+    ...state,
+    meta: {
+      ...state.meta,
+      ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
+    },
+    companies,
+    properties,
+    units,
+    tenants,
+    leads,
+    leadEscalations,
+    contracts,
+    handovers,
+    installments,
+    payments,
+    expenses,
+    supplierInvoices,
+    propertyBudgets,
+    tickets,
+    tasks,
+    meterReadings,
+    documents,
+    owners,
+    ownerShares,
+    ownerTransfers,
+    purchaseOrders,
+    decisions,
+    zatcaInvoices,
+    communications,
+    notifications,
+    auditLogs: canAudit ? state.auditLogs : [],
+    backups: canBackup ? state.backups : [],
+    loginHistory: canAudit || canTeam ? state.loginHistory || [] : [],
+    employeeInvitations: canTeam ? state.employeeInvitations || [] : [],
+    users: sanitizedUsers,
+  };
+}
+
 export function getNavRequiredModules(nav: string): PermissionModuleKey[] {
   switch (nav) {
     case 'dashboard':

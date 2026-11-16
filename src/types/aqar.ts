@@ -81,6 +81,7 @@ export interface StaffSecurityConfig {
   lastPasswordChangedAt?: string;
   requirePasswordChange90d?: boolean;
   tempPasswordSet?: boolean;
+  trustedDevices?: TrustedDeviceSummary[];
 }
 
 export interface StaffNotificationPrefs {
@@ -137,6 +138,12 @@ export interface StaffUser {
   notificationPrefs?: StaffNotificationPrefs;
   pendingEmailVerification?: PendingContactVerification;
   pendingPhoneVerification?: PendingContactVerification;
+  invitedBy?: string;
+  invitedAt?: string;
+  inviteStatus?: EmployeeInviteStatus;
+  verifiedEmail?: boolean;
+  verifiedPhone?: boolean;
+  online?: boolean;
 }
 
 export type EmployeeInviteChannel = 'whatsapp' | 'email' | 'sms' | 'copy_link';
@@ -311,6 +318,7 @@ export interface Unit {
   kitchenInstalled?: boolean;
   status: UnitStatus;
   linkedTenantId?: string;
+  currentTenantId?: string;
   vacantSince?: string;
   notes?: string;
   archivedAt?: string;
@@ -507,6 +515,7 @@ export interface Lead {
   assignedTo: string;
   notes?: string;
   convertedToTenantId?: string;
+  convertedTenantId?: string;
   interactions?: LeadInteraction[];
   createdAt?: string;
   updatedAt?: string;
@@ -953,6 +962,7 @@ export interface CommunicationLog {
   summary: string;
   scheduledAt?: string;
   status?: 'مرسل' | 'مقروء' | 'مجدول' | 'مكتمل';
+  tenantId?: string;
   sentBy: string;
   createdAt: string;
 }
@@ -1086,6 +1096,9 @@ export interface DocumentRecord {
   fileSizeKb: number;
   relatedType: 'عقار' | 'وحدة' | 'مستأجر' | 'عقد' | 'مصروف' | 'صيانة' | 'سند' | 'مورد' | 'شركة';
   relatedId: string;
+  propertyId?: string;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
   expiryDate?: string;
   version: number;
   uploadedBy: string;
@@ -1145,6 +1158,7 @@ export interface ExecutiveDecision {
   category: 'مالي' | 'تشغيلي' | 'صيانة' | 'سياسات' | 'عقود';
   summary: string;
   effectiveDate: string;
+  propertyId?: string;
   issuedBy: string;
   issuedByName: string;
   status: 'نافذ' | 'تحت المراجعة' | 'منتهي';
@@ -1160,6 +1174,7 @@ export interface NotificationItem {
   category: 'مالية' | 'تشغيلية' | 'إدارية';
   targetRoles: RoleKey[];
   relatedView?: string;
+  propertyId?: string;
   isReadBy: string[];
   createdAt: string;
 }
@@ -1698,6 +1713,7 @@ export interface ZatcaInvoiceRecord {
   buyerVatNumber?: string;
   propertyId?: string;
   unitId?: string;
+  contractId?: string;
   relatedPaymentId?: string;
   subtotal: number;
   vatRate: number;
@@ -1724,6 +1740,8 @@ export interface AqarDatabaseState {
   units: Unit[];
   meterReadings?: MeterReading[];
   owners: Owner[];
+  ownerShares?: Array<{ ownerId: string; propertyId: string; sharePercent: number }>;
+  ownerTransfers?: Array<{ id: string; ownerId: string; amount: number; createdAt: string }>;
   vendors: Vendor[];
   tenants: Tenant[];
   leads: Lead[];
@@ -1772,6 +1790,7 @@ export interface AqarDatabaseState {
   teamSeeded?: boolean;
   syncRevision?: number;
   entityRevisions?: Record<string, number>;
+  meta?: { workspaceId?: string; [key: string]: unknown };
   lastUpdatedAt: string;
 }
 

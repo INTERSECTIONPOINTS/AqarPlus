@@ -85,11 +85,21 @@ import {
 } from './cryptoAuth';
 import { RecoveryPurpose, SqlitePersistence } from './sqlitePersistence';
 import {
+  ALL_PROPERTIES_SCOPE,
   buildAllDefaultRoleModulePermissions,
+  canUserAccessCompany,
+  canUserAccessProperty,
   deriveLegacyPermissionsFromModules,
+  filterStateForUser,
+  getAccessiblePropertyIdsSet,
   getDefaultModulePermissionsForRole,
   getEffectiveModulePermissions,
+  isPropertyScopeShrink,
+  isRoleDowngrade,
+  isUserAccountActive,
   ROLE_TEMPLATES,
+  sanitizeUserForClient,
+  userHasAllPropertiesAccess,
   userHasLegacyPermission,
   userHasModuleAction,
 } from '../src/utils/rbac';
@@ -189,6 +199,20 @@ export class AqarStore {
   private tenantIndex = new Map<string, Tenant>();
   private contractIndex = new Map<string, LeaseContract>();
   private idempotencyIndex = new Set<string>();
+  private pendingSecurityAudits: AuditLog[] = [];
+  private transactionDepth = 0;
+  private revokedSessionUserIds = new Set<string>();
+
+  public consumeRevokedSessionUserIds(): string[] {
+    const list = Array.from(this.revokedSessionUserIds);
+    this.revokedSessionUserIds.clear();
+    return list;
+  }
+
+  public revokeUserSessions(userId: string): void {
+    this.sqlite.revokeOtherSessionsForUser(userId);
+    this.revokedSessionUserIds.add(userId);
+  }
 
   public static workspaceExists(workspaceId: string): boolean {
     if (workspaceId === 'default') return true;
@@ -438,6 +462,11 @@ export class AqarStore {
         tempPasswordSet: !isSelf,
       };
     }
+    let revokedOtherSessions = 0;
+    if (!isSelf && (input.newPassword || input.newPin)) {
+      this.revokeUserSessions(targetUserId);
+      revokedOtherSessions = 1;
+    }
     this.addAudit(
       actor,
       'تحديث بيانات الأمان والدخول',
@@ -447,7 +476,7 @@ export class AqarStore {
       { deviceName }
     );
     this.persist();
-    return { revokedOtherSessions: 0 };
+    return { revokedOtherSessions };
   }
 
   public bumpEntityRevision(entityKey: string): number {
@@ -465,16 +494,40 @@ export class AqarStore {
     this.idempotencyIndex = new Set(this.state.processedIdempotencyKeys || []);
   }
 
+  private flushPendingSecurityAudits(): void {
+    if (this.pendingSecurityAudits.length === 0) return;
+    const entries = this.pendingSecurityAudits.splice(0, this.pendingSecurityAudits.length);
+    const seenIds = new Set(this.state.auditLogs.map((a) => a.id));
+    for (const entry of entries) {
+      if (!seenIds.has(entry.id)) {
+        seenIds.add(entry.id);
+        this.state.auditLogs.unshift(entry);
+      }
+    }
+    if (this.state.auditLogs.length > 500) {
+      this.state.auditLogs = this.state.auditLogs.slice(0, 500);
+    }
+    this.persist();
+  }
+
   private runTransaction<T>(fn: () => T): T {
+    if (this.transactionDepth > 0) {
+      return fn();
+    }
+    this.transactionDepth += 1;
     const snapshot = structuredClone(this.state);
     try {
       const result = fn();
+      this.pendingSecurityAudits = [];
       this.rebuildIndexes();
       return result;
     } catch (err) {
       this.state = snapshot;
       this.rebuildIndexes();
+      this.flushPendingSecurityAudits();
       throw err;
+    } finally {
+      this.transactionDepth -= 1;
     }
   }
 
@@ -508,7 +561,7 @@ export class AqarStore {
     const defaultCompanyId = this.getWorkspaceCompanyId(parsed.companies || seed.companies);
     const normalizedUsers: StaffUser[] = mergedUsers.map((u) => ({
       ...u,
-      companyId: u.companyId || defaultCompanyId,
+      companyId: u.role === 'sys_owner' ? u.companyId : u.companyId || defaultCompanyId,
       username: u.username || (u.email ? u.email.split('@')[0].toLowerCase() : u.id),
       accountStatus: u.accountStatus || (u.active ? 'نشط' : 'موقوف'),
       createdAt: u.createdAt || u.lastActiveAt,
@@ -844,49 +897,7 @@ export class AqarStore {
   }
 
   private sanitizeUsersForActor(actor: StaffUser): StaffUser[] {
-    const canManageUsers =
-      this.userHasPermission(actor, 'manage_users') ||
-      userHasModuleAction(this.state, actor, 'team', 'view');
-    if (canManageUsers) {
-      return this.state.users;
-    }
-    return this.state.users.map((u) => {
-      const isSelf = u.id === actor.id;
-      return {
-        id: u.id,
-        companyId: u.companyId,
-        nameAr: u.nameAr,
-        nameEn: u.nameEn,
-        username: isSelf ? u.username : undefined,
-        jobTitle: u.jobTitle,
-        department: u.department,
-        role: u.role,
-        roleLabelAr: u.roleLabelAr,
-        roleLabelEn: u.roleLabelEn,
-        customRoleId: isSelf ? u.customRoleId : undefined,
-        email: isSelf ? u.email : '',
-        phone: isSelf ? u.phone : '',
-        secondaryPhone: isSelf ? u.secondaryPhone : undefined,
-        approvalLimitSar: isSelf ? u.approvalLimitSar : 0,
-        active: u.active,
-        accountStatus: u.accountStatus,
-        ownerId: isSelf ? u.ownerId : undefined,
-        deviceName: isSelf ? u.deviceName : '',
-        lastActiveAt: u.lastActiveAt,
-        lastLoginAt: isSelf ? u.lastLoginAt : undefined,
-        joinedAt: isSelf ? u.joinedAt : undefined,
-        createdAt: isSelf ? u.createdAt : undefined,
-        statusState: u.statusState,
-        specialty: u.specialty,
-        avatarDataUrl: u.avatarDataUrl,
-        allowedPropertyIds: isSelf ? u.allowedPropertyIds : undefined,
-        customModulePermissions: isSelf ? u.customModulePermissions : undefined,
-        security: isSelf ? u.security : undefined,
-        notificationPrefs: isSelf ? u.notificationPrefs : undefined,
-        pendingEmailVerification: isSelf ? u.pendingEmailVerification : undefined,
-        pendingPhoneVerification: isSelf ? u.pendingPhoneVerification : undefined,
-      };
-    });
+    return filterStateForUser(this.state, actor, { workspaceId: this.workspaceId }).users;
   }
 
   public getStateForUser(userId?: string): AqarDatabaseState {
@@ -899,129 +910,7 @@ export class AqarStore {
     if (!user) {
       throw new Error('المستخدم غير مصرح له أو موقوف');
     }
-
-    const canViewAudit =
-      this.userHasPermission(user, 'view_audit') ||
-      userHasModuleAction(this.state, user, 'audit', 'view');
-    const canBackup =
-      this.userHasPermission(user, 'backup_restore') ||
-      userHasModuleAction(this.state, user, 'backups', 'view');
-    const canViewTeam =
-      this.userHasPermission(user, 'manage_users') ||
-      userHasModuleAction(this.state, user, 'team', 'view');
-    const sanitizedUsers = this.sanitizeUsersForActor(user);
-    const visibleInvitations = canViewTeam ? (this.state.employeeInvitations || []) : [];
-
-    // Property-level isolation for staff members when allowedPropertyIds is restricted
-    if (user.role !== 'owner' && user.role !== 'gm' && user.role !== 'sys_owner') {
-      const allowedProps = user.allowedPropertyIds;
-      if (Array.isArray(allowedProps) && allowedProps.length > 0) {
-        const propSet = new Set(allowedProps);
-        const unitSet = new Set(this.state.units.filter((u) => propSet.has(u.propertyId)).map((u) => u.id));
-        const ctrSet = new Set(this.state.contracts.filter((c) => propSet.has(c.propertyId)).map((c) => c.id));
-        const tenantSet = new Set(
-          this.state.contracts.filter((c) => propSet.has(c.propertyId)).map((c) => c.tenantId)
-        );
-        return {
-          ...this.state,
-          users: sanitizedUsers,
-          employeeInvitations: visibleInvitations,
-          auditLogs: canViewAudit
-            ? this.state.auditLogs.filter((a) => !a.propertyId || propSet.has(a.propertyId))
-            : [],
-          loginHistory: canViewAudit ? this.state.loginHistory : [],
-          backups: canBackup ? this.state.backups : [],
-          properties: this.state.properties.filter((p) => propSet.has(p.id)),
-          units: this.state.units.filter((u) => unitSet.has(u.id)),
-          tenants: this.state.tenants.filter((t) => tenantSet.has(t.id)),
-          contracts: this.state.contracts.filter((c) => ctrSet.has(c.id)),
-          handovers: this.state.handovers.filter((h) => propSet.has(h.propertyId)),
-          installments: this.state.installments.filter((i) => propSet.has(i.propertyId)),
-          payments: this.state.payments.filter((p) => propSet.has(p.propertyId)),
-          expenses: this.state.expenses.filter((e) => propSet.has(e.propertyId)),
-          supplierInvoices: (this.state.supplierInvoices || []).filter((si) => propSet.has(si.propertyId)),
-          propertyBudgets: (this.state.propertyBudgets || []).filter((pb) => propSet.has(pb.propertyId)),
-          tickets: this.state.tickets.filter((t) => propSet.has(t.propertyId)),
-          tasks: this.state.tasks.filter((t) => !t.propertyId || propSet.has(t.propertyId) || t.assignedTo === user.id),
-          leads: this.state.leads.filter((l) => propSet.has(l.propertyId)),
-          leadEscalations: (this.state.leadEscalations || []).filter((le) => propSet.has(le.propertyId)),
-          meterReadings: (this.state.meterReadings || []).filter((mr) => propSet.has(mr.propertyId)),
-          documents: this.state.documents.filter(
-            (d) =>
-              d.relatedType === 'شركة' ||
-              (d.relatedType === 'عقار' && propSet.has(d.relatedId)) ||
-              (d.relatedType === 'وحدة' && unitSet.has(d.relatedId)) ||
-              (d.relatedType === 'عقد' && ctrSet.has(d.relatedId)) ||
-              (d.relatedType === 'مستأجر' && tenantSet.has(d.relatedId))
-          ),
-        };
-      }
-      return {
-        ...this.state,
-        users: sanitizedUsers,
-        employeeInvitations: visibleInvitations,
-        auditLogs: canViewAudit ? this.state.auditLogs : [],
-        loginHistory: canViewAudit ? this.state.loginHistory : [],
-        backups: canBackup ? this.state.backups : [],
-      };
-    }
-
-    if (user.role !== 'owner' || !user.ownerId) {
-      return {
-        ...this.state,
-        users: sanitizedUsers,
-        employeeInvitations: visibleInvitations,
-        auditLogs: canViewAudit ? this.state.auditLogs : [],
-        loginHistory: canViewAudit ? this.state.loginHistory : [],
-        backups: canBackup ? this.state.backups : [],
-      };
-    }
-    // Owner isolation: owner can ONLY see properties they own and related records
-    const ownedPropIds = new Set(
-      this.state.properties
-        .filter((p) => p.ownerShares.some((s) => s.ownerId === user.ownerId))
-        .map((p) => p.id)
-    );
-    const ownedUnitIds = new Set(
-      this.state.units.filter((u) => ownedPropIds.has(u.propertyId)).map((u) => u.id)
-    );
-    const ownedContractIds = new Set(
-      this.state.contracts.filter((c) => ownedPropIds.has(c.propertyId)).map((c) => c.id)
-    );
-    const ownedTenantIds = new Set(
-      this.state.contracts.filter((c) => ownedPropIds.has(c.propertyId)).map((c) => c.tenantId)
-    );
-
-    return {
-      ...this.state,
-      users: sanitizedUsers,
-      employeeInvitations: [],
-      properties: this.state.properties.filter((p) => ownedPropIds.has(p.id)),
-      units: this.state.units.filter((u) => ownedUnitIds.has(u.id)),
-      contracts: this.state.contracts.filter((c) => ownedContractIds.has(c.id)),
-      handovers: this.state.handovers.filter((h) => ownedPropIds.has(h.propertyId)),
-      installments: this.state.installments.filter((i) => ownedPropIds.has(i.propertyId)),
-      payments: this.state.payments.filter((p) => ownedPropIds.has(p.propertyId)),
-      expenses: this.state.expenses.filter((e) => ownedPropIds.has(e.propertyId) && e.approvalStatus === 'معتمد'),
-      supplierInvoices: (this.state.supplierInvoices || []).filter((si) => ownedPropIds.has(si.propertyId)),
-      propertyBudgets: (this.state.propertyBudgets || []).filter((pb) => ownedPropIds.has(pb.propertyId)),
-      tickets: this.state.tickets.filter((t) => ownedPropIds.has(t.propertyId)),
-      leads: this.state.leads.filter((l) => ownedPropIds.has(l.propertyId)),
-      leadEscalations: (this.state.leadEscalations || []).filter((le) => ownedPropIds.has(le.propertyId)),
-      meterReadings: (this.state.meterReadings || []).filter((mr) => ownedPropIds.has(mr.propertyId)),
-      owners: this.state.owners.filter((o) => o.id === user.ownerId),
-      tenants: this.state.tenants.filter((t) => ownedTenantIds.has(t.id)),
-      documents: this.state.documents.filter(
-        (d) =>
-          (d.relatedType === 'عقار' && ownedPropIds.has(d.relatedId)) ||
-          (d.relatedType === 'وحدة' && ownedUnitIds.has(d.relatedId)) ||
-          (d.relatedType === 'عقد' && ownedContractIds.has(d.relatedId)) ||
-          (d.relatedType === 'مستأجر' && ownedTenantIds.has(d.relatedId))
-      ),
-      auditLogs: [],
-      loginHistory: [],
-      backups: [],
-    };
+    return filterStateForUser(this.state, user, { workspaceId: this.workspaceId });
   }
 
   private getActingUser(userId: string): StaffUser {
@@ -1032,24 +921,248 @@ export class AqarStore {
     return user;
   }
 
+  private createSecurityAuditEntry(input: {
+    user?: StaffUser;
+    userId?: string;
+    userName?: string;
+    userRole?: string;
+    action: string;
+    entityType: string;
+    entityId: string;
+    summary: string;
+    propertyId?: string;
+    deviceName?: string;
+    ipAddress?: string;
+  }): AuditLog {
+    const now = new Date().toISOString();
+    return {
+      id: uid('aud'),
+      userId: input.user?.id || input.userId || 'anonymous',
+      userName: input.user?.nameAr || input.userName || 'غير معروف',
+      userRole: input.user?.roleLabelAr || input.userRole || 'مستخدم',
+      deviceName: input.deviceName || input.user?.deviceName || 'Web Terminal',
+      ipAddress: input.ipAddress || '127.0.0.1',
+      geoLocation: 'الرياض · المملكة العربية السعودية',
+      propertyId: input.propertyId,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      summary: input.summary,
+      createdAt: now,
+    };
+  }
+
+  public recordSecurityAudit(input: {
+    userId?: string;
+    userName?: string;
+    userRole?: string;
+    action: string;
+    entityType: string;
+    entityId: string;
+    summary: string;
+    propertyId?: string;
+    deviceName?: string;
+    ipAddress?: string;
+  }): void {
+    const matchedUser = input.userId ? this.state.users.find((u) => u.id === input.userId) : undefined;
+    const entry = this.createSecurityAuditEntry({ ...input, user: matchedUser });
+    this.state.auditLogs.unshift(entry);
+    if (this.state.auditLogs.length > 500) {
+      this.state.auditLogs = this.state.auditLogs.slice(0, 500);
+    }
+    this.persist();
+  }
+
+  private recordDeniedAccess(
+    actor: StaffUser | undefined,
+    action: string,
+    entityType: string,
+    entityId: string,
+    summary: string,
+    opts?: { propertyId?: string; deviceName?: string; ipAddress?: string }
+  ): void {
+    const entry = this.createSecurityAuditEntry({
+      user: actor,
+      action,
+      entityType,
+      entityId,
+      summary,
+      propertyId: opts?.propertyId,
+      deviceName: opts?.deviceName,
+      ipAddress: opts?.ipAddress,
+    });
+    if (this.transactionDepth > 0) {
+      this.pendingSecurityAudits.push(entry);
+    }
+    if (!this.state.auditLogs.some((a) => a.id === entry.id)) {
+      this.state.auditLogs.unshift(entry);
+    }
+    if (this.state.auditLogs.length > 500) {
+      this.state.auditLogs = this.state.auditLogs.slice(0, 500);
+    }
+    this.persist();
+  }
+
   private userHasPermission(user: StaffUser, permission: PermissionKey): boolean {
     return userHasLegacyPermission(this.state, user, permission);
   }
 
-  private assertPermission(userId: string, permission: PermissionKey): StaffUser {
+  private assertPermission(
+    userId: string,
+    permission: PermissionKey,
+    context?: { entityType?: string; entityId?: string; propertyId?: string; deviceName?: string }
+  ): StaffUser {
     const user = this.getActingUser(userId);
     if (!this.userHasPermission(user, permission)) {
-      throw new PermissionDeniedError(`لا تملك صلاحية تنفيذ هذا الإجراء (${permission})`);
+      const msg = `لا تملك صلاحية تنفيذ هذا الإجراء (${permission})`;
+      this.recordDeniedAccess(
+        user,
+        'رفض محاولة وصول أو إجراء غير مصرح به',
+        context?.entityType || 'Security',
+        context?.entityId || permission,
+        msg,
+        { propertyId: context?.propertyId, deviceName: context?.deviceName }
+      );
+      throw new PermissionDeniedError(msg);
     }
     return user;
   }
 
-  public assertModuleAction(userId: string, module: PermissionModuleKey, action: PermissionLevel = 'view'): StaffUser {
+  public assertModuleAction(
+    userId: string,
+    module: PermissionModuleKey,
+    action: PermissionLevel = 'view',
+    context?: { entityType?: string; entityId?: string; propertyId?: string; deviceName?: string }
+  ): StaffUser {
     const user = this.getActingUser(userId);
     if (!userHasModuleAction(this.state, user, module, action)) {
-      throw new PermissionDeniedError(`لا تملك صلاحية (${action}) على قسم (${module})`);
+      const msg = `لا تملك صلاحية (${action}) على قسم (${module})`;
+      this.recordDeniedAccess(
+        user,
+        'رفض محاولة وصول أو إجراء غير مصرح به',
+        context?.entityType || 'RBAC',
+        context?.entityId || `${module}:${action}`,
+        msg,
+        { propertyId: context?.propertyId, deviceName: context?.deviceName }
+      );
+      throw new PermissionDeniedError(msg);
     }
     return user;
+  }
+
+  public assertPropertyAccess(
+    user: StaffUser,
+    propertyId: string | undefined,
+    actionLabel: string,
+    entityType = 'Property',
+    entityId = propertyId || 'unscoped',
+    deviceName?: string
+  ): void {
+    if (!propertyId) {
+      if (userHasAllPropertiesAccess(this.state, user)) return;
+      const msg = `رفض ${actionLabel}: الحساب مقيد بنطاق عقارات محدد ولا يملك صلاحية الوصول الشامل`;
+      this.recordDeniedAccess(user, 'رفض وصول خارج نطاق العقارات', entityType, entityId, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+    const prop = this.propIndex.get(propertyId) || this.state.properties.find((p) => p.id === propertyId);
+    if (prop && !canUserAccessCompany(this.state, user, prop.companyId)) {
+      const msg = `رفض ${actionLabel}: العقار يتبع شركة أخرى خارج نطاق حسابك`;
+      this.recordDeniedAccess(user, 'رفض وصول عبر الشركات', entityType, entityId, msg, { propertyId, deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+    if (!canUserAccessProperty(this.state, user, propertyId)) {
+      const msg = `رفض ${actionLabel}: العقار (${propertyId}) خارج نطاق العقارات المصرح لك بها`;
+      this.recordDeniedAccess(user, 'رفض وصول خارج نطاق العقارات', entityType, entityId, msg, { propertyId, deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+  }
+
+  private getTenantLinkedPropertyIds(tenantId: string): string[] {
+    const propSet = new Set<string>();
+    for (const c of this.state.contracts) {
+      if (c.tenantId === tenantId && c.propertyId) propSet.add(c.propertyId);
+    }
+    for (const u of this.state.units) {
+      if ((u.currentTenantId === tenantId || u.linkedTenantId === tenantId) && u.propertyId) {
+        propSet.add(u.propertyId);
+      }
+    }
+    for (const l of this.state.leads) {
+      const linkedTid = (l as any).convertedToTenantId || (l as any).convertedTenantId;
+      if (linkedTid === tenantId && l.propertyId) propSet.add(l.propertyId);
+    }
+    return Array.from(propSet);
+  }
+
+  private assertTenantAccess(user: StaffUser, tenantId: string, actionLabel: string, deviceName?: string): Tenant {
+    const tenant = this.tenantIndex.get(tenantId) || this.state.tenants.find((t) => t.id === tenantId);
+    if (!tenant) throw new Error('المستأجر غير موجود');
+    if (user.role === 'owner') {
+      const msg = `رفض ${actionLabel}: حساب المالك للقراءة فقط`;
+      this.recordDeniedAccess(user, 'رفض محاولة تعديل من حساب مالك', 'Tenant', tenantId, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+    const linkedProps = this.getTenantLinkedPropertyIds(tenantId);
+    if (userHasAllPropertiesAccess(this.state, user)) {
+      if (!canUserAccessCompany(this.state, user, (tenant as any).companyId)) {
+        const msg = `رفض ${actionLabel}: المستأجر يتبع شركة أخرى`;
+        this.recordDeniedAccess(user, 'رفض وصول عبر الشركات', 'Tenant', tenantId, msg, { deviceName });
+        throw new PermissionDeniedError(msg);
+      }
+      return tenant;
+    }
+    const scope = getAccessiblePropertyIdsSet(this.state, user);
+    if (scope.size === 0) {
+      const msg = `رفض ${actionLabel}: لا توجد عقارات مصرح بها في حسابك`;
+      this.recordDeniedAccess(user, 'رفض وصول بدون نطاق عقارات', 'Tenant', tenantId, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+    if (linkedProps.length > 0 && !linkedProps.some((pid) => scope.has(pid))) {
+      const msg = `رفض ${actionLabel}: ملف المستأجر خارج نطاق العقارات المصرح لك بها`;
+      this.recordDeniedAccess(user, 'رفض وصول خارج نطاق العقارات', 'Tenant', tenantId, msg, {
+        propertyId: linkedProps[0],
+        deviceName,
+      });
+      throw new PermissionDeniedError(msg);
+    }
+    return tenant;
+  }
+
+  private assertLeadAccess(user: StaffUser, lead: Lead, actionLabel: string, deviceName?: string): void {
+    if (lead.propertyId) {
+      this.assertPropertyAccess(user, lead.propertyId, actionLabel, 'Lead', lead.id, deviceName);
+      return;
+    }
+    if (!userHasAllPropertiesAccess(this.state, user) && lead.assignedTo !== user.id) {
+      const msg = `رفض ${actionLabel}: ملف المهتم خارج نطاق حسابك`;
+      this.recordDeniedAccess(user, 'رفض وصول خارج النطاق', 'Lead', lead.id, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+  }
+
+  private resolveDocumentPropertyId(doc: DocumentRecord): string | undefined {
+    if (doc.propertyId) return doc.propertyId;
+    const relType = doc.relatedEntityType || (doc as any).relatedType;
+    const relId = doc.relatedEntityId || (doc as any).relatedId;
+    if (!relId) return undefined;
+    if (relType === 'Property' || relType === 'عقار') return relId;
+    if (relType === 'Unit' || relType === 'وحدة') return this.state.units.find((u) => u.id === relId)?.propertyId;
+    if (relType === 'Contract' || relType === 'عقد') return this.state.contracts.find((c) => c.id === relId)?.propertyId;
+    if (relType === 'Ticket') return this.state.tickets.find((t) => t.id === relId)?.propertyId;
+    if (relType === 'Expense') return this.state.expenses.find((e) => e.id === relId)?.propertyId;
+    if (relType === 'Handover') return this.state.handovers.find((h) => h.id === relId)?.propertyId;
+    return undefined;
+  }
+
+  private assertDocumentAccess(user: StaffUser, doc: DocumentRecord, actionLabel: string, deviceName?: string): void {
+    const relType = doc.relatedEntityType || (doc as any).relatedType;
+    const relId = doc.relatedEntityId || (doc as any).relatedId;
+    if ((relType === 'Tenant' || relType === 'مستأجر') && relId) {
+      this.assertTenantAccess(user, relId, actionLabel, deviceName);
+      return;
+    }
+    const propId = this.resolveDocumentPropertyId(doc);
+    this.assertPropertyAccess(user, propId, actionLabel, 'Document', doc.id, deviceName);
   }
 
   private addAudit(
@@ -1124,15 +1237,28 @@ export class AqarStore {
 
   // 1. Properties & Units
   public createProperty(userId: string, input: Omit<Property, 'id' | 'createdAt'>, deviceName?: string): Property {
-    const user = this.assertPermission(userId, 'manage_properties');
+    const user = this.assertPermission(userId, 'manage_properties', { entityType: 'Property', deviceName });
+    if (input.companyId && !canUserAccessCompany(this.state, user, input.companyId)) {
+      const msg = 'رفض إضافة عقار: الشركة المحددة خارج نطاق حسابك';
+      this.recordDeniedAccess(user, 'رفض وصول عبر الشركات', 'Property', input.companyId, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     const prop: Property = {
       ...input,
+      companyId: input.companyId || user.companyId || this.getWorkspaceCompanyId(),
       id: uid('prop'),
       createdAt: new Date().toISOString(),
     };
     this.state.properties.push(prop);
+    if (!userHasAllPropertiesAccess(this.state, user) && user.role !== 'owner') {
+      const existingAllowed = Array.isArray(user.allowedPropertyIds) ? user.allowedPropertyIds : [];
+      if (!existingAllowed.includes(prop.id)) {
+        user.allowedPropertyIds = [...existingAllowed, prop.id];
+      }
+    }
     this.addAudit(user, 'إضافة عقار جديد', 'Property', prop.id, `إضافة العقار ${prop.nameAr} (${prop.code})`, {
       deviceName,
+      propertyId: prop.id,
       newValue: prop.status,
     });
     this.persist();
@@ -1140,9 +1266,14 @@ export class AqarStore {
   }
 
   public createUnit(userId: string, input: Omit<Unit, 'id'>, deviceName?: string): Unit {
-    const user = this.assertPermission(userId, 'manage_properties');
+    const user = this.assertPermission(userId, 'manage_properties', {
+      entityType: 'Unit',
+      propertyId: input.propertyId,
+      deviceName,
+    });
     const prop = this.state.properties.find((p) => p.id === input.propertyId);
     if (!prop) throw new Error('العقار المحدد غير موجود');
+    this.assertPropertyAccess(user, prop.id, 'إضافة وحدة', 'Unit', input.propertyId, deviceName);
     const duplicate = this.state.units.find(
       (u) => u.propertyId === input.propertyId && u.unitNumber.trim() === input.unitNumber.trim()
     );
@@ -1155,6 +1286,7 @@ export class AqarStore {
     this.state.units.push(unit);
     this.addAudit(user, 'إضافة وحدة جديدة', 'Unit', unit.id, `إضافة الوحدة ${unit.unitNumber} في ${prop.nameAr}`, {
       deviceName,
+      propertyId: prop.id,
       newValue: unit.status,
     });
     this.persist();
@@ -1168,9 +1300,10 @@ export class AqarStore {
     reason?: string,
     deviceName?: string
   ): Unit {
-    const user = this.assertPermission(userId, 'manage_properties');
+    const user = this.assertPermission(userId, 'manage_properties', { entityType: 'Unit', entityId: unitId, deviceName });
     const unit = this.state.units.find((u) => u.id === unitId);
     if (!unit) throw new Error('الوحدة غير موجودة');
+    this.assertPropertyAccess(user, unit.propertyId, 'تحديث حالة وحدة', 'Unit', unit.id, deviceName);
 
     // Business Rule: Cannot make a leased unit vacant just by flipping status if active contract exists without handover!
     const hasActiveContract = this.state.contracts.some(
@@ -1202,6 +1335,7 @@ export class AqarStore {
       oldValue: oldStatus,
       newValue: status,
       reason,
+      propertyId: unit.propertyId,
       deviceName,
     });
     this.persist();
@@ -1209,10 +1343,12 @@ export class AqarStore {
   }
 
   public linkTenantToUnit(userId: string, unitId: string, tenantId: string, deviceName?: string): Unit {
-    const user = this.assertPermission(userId, 'manage_tenants');
+    const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Unit', entityId: unitId, deviceName });
     const unit = this.state.units.find((u) => u.id === unitId);
     const tenant = this.state.tenants.find((t) => t.id === tenantId);
     if (!unit || !tenant) throw new Error('الوحدة أو المستأجر غير موجود');
+    this.assertPropertyAccess(user, unit.propertyId, 'ربط مستأجر بوحدة', 'Unit', unit.id, deviceName);
+    this.assertTenantAccess(user, tenant.id, 'ربط مستأجر بوحدة', deviceName);
     if (unit.status === 'مؤجرة') throw new Error('الوحدة مؤجرة حالياً بعقد ساري');
 
     const oldVal = unit.status;
@@ -1227,7 +1363,7 @@ export class AqarStore {
       'Unit',
       unit.id,
       `ربط المستأجر ${tenant.nameAr} بالوحدة ${unit.unitNumber} كحجز إداري (دون إنشاء عقد تلقائي)`,
-      { oldValue: oldVal, newValue: unit.status, deviceName }
+      { oldValue: oldVal, newValue: unit.status, propertyId: unit.propertyId, deviceName }
     );
     this.persist();
     return unit;
@@ -1235,7 +1371,12 @@ export class AqarStore {
 
   // 2. Tenants & Leads
   public createTenant(userId: string, input: Omit<Tenant, 'id' | 'createdAt'>, deviceName?: string): Tenant {
-    const user = this.assertPermission(userId, 'manage_tenants');
+    const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Tenant', deviceName });
+    if (!userHasAllPropertiesAccess(this.state, user) && getAccessiblePropertyIdsSet(this.state, user).size === 0) {
+      const msg = 'رفض تسجيل مستأجر: الحساب مقيد بصفر عقار ولا يملك نطاقاً مصرحاً به';
+      this.recordDeniedAccess(user, 'رفض إنشاء بدون نطاق عقارات', 'Tenant', 'create', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     const dup = this.state.tenants.find((t) => t.nationalIdOrIqama.trim() === input.nationalIdOrIqama.trim());
     if (dup) {
       throw new Error(`تنبيه تكرار: رقم الهوية/الإقامة مسجل مسبقاً باسم ${dup.nameAr}`);
@@ -1245,6 +1386,7 @@ export class AqarStore {
       id: uid('ten'),
       createdAt: new Date().toISOString(),
     };
+    (tenant as any).companyId = (input as any).companyId || user.companyId || this.getWorkspaceCompanyId();
     this.state.tenants.push(tenant);
     this.addAudit(user, 'تسجيل مستأجر جديد', 'Tenant', tenant.id, `إضافة ملف المستأجر ${tenant.nameAr}`, {
       deviceName,
@@ -1255,9 +1397,8 @@ export class AqarStore {
   }
 
   public deleteTenant(userId: string, tenantId: string, deviceName?: string): void {
-    const user = this.assertPermission(userId, 'manage_tenants');
-    const tenant = this.state.tenants.find((t) => t.id === tenantId);
-    if (!tenant) throw new Error('المستأجر غير موجود');
+    const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Tenant', entityId: tenantId, deviceName });
+    const tenant = this.assertTenantAccess(user, tenantId, 'أرشفة/حذف مستأجر', deviceName);
 
     const hasActiveContract = this.state.contracts.some(
       (c) => c.tenantId === tenantId && (c.lifecycleStatus === 'نشط' || c.lifecycleStatus === 'بانتظار التوثيق')
@@ -1282,7 +1423,18 @@ export class AqarStore {
   }
 
   public createLead(userId: string, input: Omit<Lead, 'id'>, deviceName?: string): Lead {
-    const user = this.assertPermission(userId, 'manage_contracts');
+    const user = this.assertPermission(userId, 'manage_contracts', {
+      entityType: 'Lead',
+      propertyId: input.propertyId,
+      deviceName,
+    });
+    if (input.propertyId) {
+      this.assertPropertyAccess(user, input.propertyId, 'تسجيل مهتم', 'Lead', input.propertyId, deviceName);
+    } else if (!userHasAllPropertiesAccess(this.state, user) && getAccessiblePropertyIdsSet(this.state, user).size === 0) {
+      const msg = 'رفض تسجيل مهتم: لا توجد عقارات مصرح بها في حسابك';
+      this.recordDeniedAccess(user, 'رفض وصول بدون نطاق عقارات', 'Lead', 'create', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     const now = new Date().toISOString();
     const lead: Lead = {
       ...input,
@@ -1318,10 +1470,20 @@ export class AqarStore {
     deviceName?: string
   ): { contract: LeaseContract; installments: Installment[] } {
     return this.runTransaction(() => {
-    const user = this.assertPermission(userId, 'manage_contracts');
+    const user = this.assertPermission(userId, 'manage_contracts', {
+      entityType: 'LeaseContract',
+      propertyId: input.propertyId,
+      deviceName,
+    });
     const unit = this.unitIndex.get(input.unitId) || this.state.units.find((u) => u.id === input.unitId);
     const tenant = this.tenantIndex.get(input.tenantId) || this.state.tenants.find((t) => t.id === input.tenantId);
     if (!unit || !tenant) throw new Error('الوحدة أو المستأجر غير موجود');
+    const resolvedPropId = input.propertyId || unit.propertyId;
+    if (unit.propertyId !== resolvedPropId) {
+      throw new Error('الوحدة المحددة لا تتبع العقار المختار');
+    }
+    this.assertPropertyAccess(user, resolvedPropId, 'إنشاء عقد', 'LeaseContract', unit.id, deviceName);
+    this.assertTenantAccess(user, tenant.id, 'إنشاء عقد لمستأجر', deviceName);
 
     const activeOnUnit = this.state.contracts.find(
       (c) => c.unitId === unit.id && (c.lifecycleStatus === 'نشط' || c.lifecycleStatus === 'بانتظار التوثيق')
@@ -1422,9 +1584,10 @@ export class AqarStore {
     lifecycleStatus: LeaseContract['lifecycleStatus'],
     deviceName?: string
   ): LeaseContract {
-    const user = this.assertPermission(userId, 'manage_contracts');
+    const user = this.assertPermission(userId, 'manage_contracts', { entityType: 'LeaseContract', entityId: contractId, deviceName });
     const contract = this.state.contracts.find((c) => c.id === contractId);
     if (!contract) throw new Error('العقد غير موجود');
+    this.assertPropertyAccess(user, contract.propertyId, 'تحديث توثيق العقد', 'LeaseContract', contract.id, deviceName);
 
     const oldVal = `${contract.lifecycleStatus} / ${contract.ejarStatus}`;
     const prevLifecycle = contract.lifecycleStatus;
@@ -1453,7 +1616,7 @@ export class AqarStore {
       'LeaseContract',
       contract.id,
       `تحديث العقد ${contract.internalNumber} (الإصدار ${contract.version}) إلى ${lifecycleStatus} · إيجار: ${ejarStatus}`,
-      { oldValue: oldVal, newValue: `${lifecycleStatus} / ${ejarStatus}`, deviceName }
+      { oldValue: oldVal, newValue: `${lifecycleStatus} / ${ejarStatus}`, propertyId: contract.propertyId, deviceName }
     );
     this.persist();
     return contract;
@@ -1465,10 +1628,11 @@ export class AqarStore {
     input: Omit<HandoverInspection, 'id' | 'createdAt' | 'status' | 'netRefundOrDue' | 'inspectorId'>,
     deviceName?: string
   ): HandoverInspection {
-    const user = this.assertPermission(userId, 'manage_properties');
+    const user = this.assertPermission(userId, 'manage_properties', { entityType: 'HandoverInspection', propertyId: input.propertyId, deviceName });
     const contract = this.state.contracts.find((c) => c.id === input.contractId);
     const unit = this.state.units.find((u) => u.id === input.unitId);
     if (!contract || !unit) throw new Error('العقد أو الوحدة غير موجودة');
+    this.assertPropertyAccess(user, contract.propertyId, 'إعداد محضر استلام/إخلاء', 'HandoverInspection', contract.id, deviceName);
 
     const netRefundOrDue = input.depositHeld - input.damageCost - input.unpaidRentDue;
     const handover: HandoverInspection = {
@@ -1486,7 +1650,7 @@ export class AqarStore {
       'HandoverInspection',
       handover.id,
       `محضر ${handover.type} للوحدة ${unit.unitNumber} - صافي التسوية: ${netRefundOrDue} ر.س`,
-      { deviceName, newValue: handover.status }
+      { deviceName, propertyId: contract.propertyId, newValue: handover.status }
     );
     this.addNotification(
       `محضر ${handover.type} بانتظار الاعتماد`,
@@ -1508,14 +1672,15 @@ export class AqarStore {
     deviceName?: string
   ): HandoverInspection {
     return this.runTransaction(() => {
-    const user = this.assertPermission(userId, 'approve_expense_supervisor');
+    const user = this.assertPermission(userId, 'approve_expense_supervisor', { entityType: 'HandoverInspection', entityId: handoverId, deviceName });
     const handover = this.state.handovers.find((h) => h.id === handoverId);
     if (!handover) throw new Error('المحضر غير موجود');
-    handover.status = 'معتمد';
-    handover.approvedBy = user.id;
-
     const unit = this.unitIndex.get(handover.unitId) || this.state.units.find((u) => u.id === handover.unitId);
     const contract = this.contractIndex.get(handover.contractId) || this.state.contracts.find((c) => c.id === handover.contractId);
+    const propId = handover.propertyId || contract?.propertyId || unit?.propertyId;
+    this.assertPropertyAccess(user, propId, 'اعتماد محضر استلام وإخلاء', 'HandoverInspection', handover.id, deviceName);
+    handover.status = 'معتمد';
+    handover.approvedBy = user.id;
     if (handover.type === 'إخلاء واستلام') {
       if (contract) {
         contract.preArchiveStatus = contract.lifecycleStatus;
@@ -1578,7 +1743,12 @@ export class AqarStore {
     deviceName?: string
   ): Payment {
     return this.runTransaction(() => {
-    const user = this.assertPermission(userId, 'collect_payments');
+    const user = this.assertPermission(userId, 'collect_payments', { entityType: 'Payment', deviceName });
+
+    // Validate contract & property scope BEFORE idempotency short-circuit so out-of-scope actors cannot replay or probe keys
+    const contract = this.contractIndex.get(input.contractId) || this.state.contracts.find((c) => c.id === input.contractId);
+    if (!contract) throw new Error('العقد المحدد غير موجود');
+    this.assertPropertyAccess(user, contract.propertyId, 'تسجيل دفعة', 'Payment', contract.id, deviceName);
 
     // O(1) idempotency protection against duplicate sync / double click
     if (this.idempotencyIndex.has(input.idempotencyKey) || this.state.processedIdempotencyKeys.includes(input.idempotencyKey)) {
@@ -1595,8 +1765,6 @@ export class AqarStore {
 
     if (!input.amount || input.amount <= 0) throw new Error('يجب أن يكون المبلغ أكبر من صفر');
 
-    const contract = this.contractIndex.get(input.contractId) || this.state.contracts.find((c) => c.id === input.contractId);
-    if (!contract) throw new Error('العقد المحدد غير موجود');
     const property = this.propIndex.get(contract.propertyId) || this.state.properties.find((p) => p.id === contract.propertyId);
     const unit = this.unitIndex.get(contract.unitId) || this.state.units.find((u) => u.id === contract.unitId);
 
@@ -1751,12 +1919,13 @@ export class AqarStore {
 
   public reverseReceipt(userId: string, paymentId: string, reason: string, deviceName?: string): Payment {
     return this.runTransaction(() => {
-    const user = this.assertPermission(userId, 'reverse_receipts');
+    const user = this.assertPermission(userId, 'reverse_receipts', { entityType: 'Payment', entityId: paymentId, deviceName });
     if (!reason || reason.trim().length < 5) {
       throw new Error('يجب إدخال سبب واضح لإلغاء السند وإصدار حركة عكسية');
     }
     const original = this.state.payments.find((p) => p.id === paymentId);
     if (!original) throw new Error('السند المطلوب غير موجود');
+    this.assertPropertyAccess(user, original.propertyId, 'عكس سند قبض', 'Payment', original.id, deviceName);
     if (original.status === 'معكوس') throw new Error('هذا السند تم عكسه مسبقاً');
 
     original.preArchiveStatus = 'معتمد';
@@ -1851,7 +2020,8 @@ export class AqarStore {
     > & { isDraft?: boolean },
     deviceName?: string
   ): Expense {
-    const user = this.assertPermission(userId, 'create_expense');
+    const user = this.assertPermission(userId, 'create_expense', { entityType: 'Expense', propertyId: input.propertyId, deviceName });
+    this.assertPropertyAccess(user, input.propertyId, 'تسجيل مصروف', 'Expense', input.propertyId, deviceName);
     const { isDraft, ...restInput } = input;
 
     // Prevent duplicate invoice registration
@@ -2068,6 +2238,7 @@ export class AqarStore {
     const user = this.getActingUser(userId);
     const expense = this.state.expenses.find((e) => e.id === expenseId);
     if (!expense) throw new Error('المصروف غير موجود');
+    this.assertPropertyAccess(user, expense.propertyId, 'اعتماد أو مراجعة مصروف', 'Expense', expense.id, deviceName);
     if (expense.approvalStatus === 'معتمد' || expense.approvalStatus === 'مرفوض' || expense.approvalStatus === 'ملغى') {
       throw new Error('تم حسم هذا المصروف مسبقاً');
     }
@@ -2075,6 +2246,7 @@ export class AqarStore {
     const oldStatus = expense.approvalStatus;
 
     if (decision === 'submit') {
+      this.assertPermission(userId, 'create_expense', { entityType: 'Expense', entityId: expense.id, propertyId: expense.propertyId, deviceName });
       if (expense.approvalStatus !== 'مسودة') throw new Error('يمكن إرسال المسودات فقط للاعتماد');
       expense.approvalStatus = 'بانتظار المشرف';
       this.addAudit(user, 'إرسال مسودة مصروف للاعتماد', 'Expense', expense.id, `إرسال المصروف ${expense.expenseNumber} للاعتماد`, {
@@ -2089,12 +2261,14 @@ export class AqarStore {
 
     // Segregation of duties: creator cannot self-approve sensitive expense unless GM/sys_owner override
     if (decision === 'approve' && expense.createdBy === user.id && user.role !== 'gm' && user.role !== 'sys_owner') {
-      throw new Error('الفصل بين المهام: لا يمكن للموظف اعتماد مصروف قام برفعه بنفسه');
+      const msg = 'الفصل بين المهام: لا يمكن للموظف اعتماد مصروف قام برفعه بنفسه';
+      this.recordDeniedAccess(user, 'رفض اعتماد ذاتي لمصروف', 'Expense', expense.id, msg, { propertyId: expense.propertyId, deviceName });
+      throw new PermissionDeniedError(msg);
     }
 
     if (decision === 'reject') {
       if (!reason) throw new Error('يجب ذكر سبب الرفض');
-      this.assertPermission(userId, 'approve_expense_supervisor');
+      this.assertPermission(userId, 'approve_expense_supervisor', { entityType: 'Expense', entityId: expense.id, propertyId: expense.propertyId, deviceName });
       expense.approvalStatus = 'مرفوض';
       expense.rejectionReason = reason;
       this.addAudit(user, 'رفض مصروف', 'Expense', expense.id, `رفض المصروف ${expense.expenseNumber}`, {
@@ -2113,13 +2287,13 @@ export class AqarStore {
 
     if (expense.approvalStatus === 'بانتظار المشرف') {
       if (isTopExec) {
-        this.assertPermission(userId, 'approve_expense_manager');
+        this.assertPermission(userId, 'approve_expense_manager', { entityType: 'Expense', entityId: expense.id, propertyId: expense.propertyId, deviceName });
         expense.approvedBySupervisor = user.id;
         expense.approvedByDeptManager = user.id;
         expense.approvedByManager = user.id;
         expense.approvalStatus = expAmountSar > 20000 ? 'بانتظار المالك' : 'معتمد';
       } else {
-        this.assertPermission(userId, 'approve_expense_supervisor');
+        this.assertPermission(userId, 'approve_expense_supervisor', { entityType: 'Expense', entityId: expense.id, propertyId: expense.propertyId, deviceName });
         expense.approvedBySupervisor = user.id;
         if (expAmountSar < 1000) {
           expense.approvalStatus = 'معتمد';
@@ -2132,22 +2306,24 @@ export class AqarStore {
       }
     } else if (expense.approvalStatus === 'بانتظار مدير القسم') {
       if (isTopExec) {
-        this.assertPermission(userId, 'approve_expense_manager');
+        this.assertPermission(userId, 'approve_expense_manager', { entityType: 'Expense', entityId: expense.id, propertyId: expense.propertyId, deviceName });
         expense.approvedByDeptManager = user.id;
         expense.approvedByManager = user.id;
         expense.approvalStatus = expAmountSar > 20000 ? 'بانتظار المالك' : 'معتمد';
       } else {
-        this.assertPermission(userId, 'approve_expense_supervisor');
+        this.assertPermission(userId, 'approve_expense_supervisor', { entityType: 'Expense', entityId: expense.id, propertyId: expense.propertyId, deviceName });
         expense.approvedByDeptManager = user.id;
         expense.approvalStatus = expAmountSar > 5000 ? 'بانتظار المدير' : 'معتمد';
       }
     } else if (expense.approvalStatus === 'بانتظار المدير') {
-      this.assertPermission(userId, 'approve_expense_manager');
+      this.assertPermission(userId, 'approve_expense_manager', { entityType: 'Expense', entityId: expense.id, propertyId: expense.propertyId, deviceName });
       expense.approvedByManager = user.id;
       expense.approvalStatus = expAmountSar > 20000 ? 'بانتظار المالك' : 'معتمد';
     } else if (expense.approvalStatus === 'بانتظار المالك') {
       if (user.role !== 'owner' && user.role !== 'sys_owner' && user.role !== 'gm') {
-        throw new Error('الموافقة النهائية للمصروفات فوق 20,000 ر.س مخصصة للمالك أو مالك النظام');
+        const msg = 'الموافقة النهائية للمصروفات فوق 20,000 ر.س مخصصة للمالك أو مالك النظام';
+        this.recordDeniedAccess(user, 'رفض اعتماد مصروف فوق السقف', 'Expense', expense.id, msg, { propertyId: expense.propertyId, deviceName });
+        throw new PermissionDeniedError(msg);
       }
       expense.approvedByOwner = user.id;
       expense.approvalStatus = 'معتمد';
@@ -2178,7 +2354,8 @@ export class AqarStore {
     },
     deviceName?: string
   ): MaintenanceTicket {
-    const user = this.assertPermission(userId, 'manage_maintenance');
+    const user = this.assertModuleAction(userId, 'maintenance', 'create', { entityType: 'MaintenanceTicket', propertyId: input.propertyId, deviceName });
+    this.assertPropertyAccess(user, input.propertyId, 'فتح بلاغ صيانة', 'MaintenanceTicket', input.propertyId, deviceName);
     this.state.counters.ticket += 1;
     const now = new Date().toISOString();
     const { createLinkedTask, ...ticketData } = input;
@@ -2224,7 +2401,7 @@ export class AqarStore {
       'MaintenanceTicket',
       ticket.id,
       `فتح البلاغ ${ticket.ticketNumber}: ${ticket.title} (الأولوية: ${ticket.priority})`,
-      { deviceName, newValue: ticket.status }
+      { deviceName, propertyId: ticket.propertyId, newValue: ticket.status }
     );
     this.addNotification(
       `بلاغ صيانة ${ticket.priority}: ${ticket.ticketNumber}`,
@@ -2245,9 +2422,10 @@ export class AqarStore {
     patch: Partial<Pick<MaintenanceTicket, 'status' | 'diagnosis' | 'actualCost' | 'assignedTo' | 'rating'>>,
     deviceName?: string
   ): MaintenanceTicket {
-    const user = this.assertPermission(userId, 'execute_maintenance');
+    const user = this.assertPermission(userId, 'execute_maintenance', { entityType: 'MaintenanceTicket', entityId: ticketId, deviceName });
     const ticket = this.state.tickets.find((t) => t.id === ticketId);
     if (!ticket) throw new Error('بلاغ الصيانة غير موجود');
+    this.assertPropertyAccess(user, ticket.propertyId, 'تحديث بلاغ صيانة', 'MaintenanceTicket', ticket.id, deviceName);
     const oldStatus = ticket.status;
     Object.assign(ticket, patch, { updatedAt: new Date().toISOString() });
 
@@ -2296,10 +2474,10 @@ export class AqarStore {
         : ['supervisor', 'leasing', 'receptionist', 'gm'];
 
     const candidates = this.state.users.filter((u) => {
-      if (!u.active || u.role === 'owner' || u.role === 'auditor') return false;
+      if (!isUserAccountActive(u) || u.role === 'owner' || u.role === 'auditor') return false;
       if (u.statusState === 'غير متصل') return false;
-      if (propertyId && Array.isArray(u.allowedPropertyIds) && u.allowedPropertyIds.length > 0) {
-        if (!u.allowedPropertyIds.includes(propertyId)) return false;
+      if (propertyId && !canUserAccessProperty(this.state, u, propertyId)) {
+        return false;
       }
       return true;
     });
@@ -2333,7 +2511,14 @@ export class AqarStore {
     input: Omit<TaskItem, 'id' | 'createdBy' | 'createdAt' | 'comments'> & { autoAssignSmart?: boolean },
     deviceName?: string
   ): TaskItem {
-    const user = this.assertPermission(userId, 'manage_tasks');
+    const user = this.assertPermission(userId, 'manage_tasks', { entityType: 'TaskItem', propertyId: input.propertyId, deviceName });
+    if (input.propertyId) {
+      this.assertPropertyAccess(user, input.propertyId, 'إنشاء مهمة', 'TaskItem', input.propertyId, deviceName);
+    } else if (!userHasAllPropertiesAccess(this.state, user) && getAccessiblePropertyIdsSet(this.state, user).size === 0) {
+      const msg = 'رفض إنشاء مهمة: لا توجد عقارات مصرح بها في حسابك';
+      this.recordDeniedAccess(user, 'رفض وصول بدون نطاق عقارات', 'TaskItem', 'create', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     const { autoAssignSmart, ...rawInput } = input;
     let finalAssignee = rawInput.assignedTo;
     let isQueued = false;
@@ -2411,9 +2596,16 @@ export class AqarStore {
     },
     deviceName?: string
   ): TaskItem {
-    const user = this.assertPermission(userId, 'manage_tasks');
+    const user = this.assertPermission(userId, 'manage_tasks', { entityType: 'TaskItem', entityId: taskId, deviceName });
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) throw new Error('المهمة غير موجودة');
+    if (task.propertyId) {
+      this.assertPropertyAccess(user, task.propertyId, 'تحديث مهمة', 'TaskItem', task.id, deviceName);
+    } else if (!userHasAllPropertiesAccess(this.state, user) && task.assignedTo !== user.id) {
+      const msg = 'رفض تحديث مهمة: المهمة خارج نطاق حسابك';
+      this.recordDeniedAccess(user, 'رفض وصول خارج النطاق', 'TaskItem', task.id, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     const oldStatus = task.status;
 
     if (patch.status) {
@@ -2472,10 +2664,13 @@ export class AqarStore {
     reason?: string,
     deviceName?: string
   ): TaskItem {
-    const user = this.assertPermission(userId, 'manage_tasks');
+    const user = this.assertPermission(userId, 'manage_tasks', { entityType: 'TaskItem', entityId: taskId, deviceName });
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) throw new Error('المهمة غير موجودة');
-    const targetUser = this.state.users.find((u) => u.id === newAssigneeId && u.active);
+    if (task.propertyId) {
+      this.assertPropertyAccess(user, task.propertyId, 'إعادة إسناد مهمة', 'TaskItem', task.id, deviceName);
+    }
+    const targetUser = this.state.users.find((u) => isUserAccountActive(u) && u.id === newAssigneeId);
     if (!targetUser) throw new Error('الموظف المستهدف غير متاح');
 
     const prevAssignee = this.state.users.find((u) => u.id === task.assignedTo);
@@ -2518,9 +2713,16 @@ export class AqarStore {
     reason?: string,
     deviceName?: string
   ): TaskItem {
-    const user = this.assertPermission(userId, 'approve_expense_supervisor');
+    const user = this.assertPermission(userId, 'approve_expense_supervisor', { entityType: 'TaskItem', entityId: taskId, deviceName });
     const task = this.state.tasks.find((t) => t.id === taskId);
     if (!task) throw new Error('المهمة غير موجودة');
+    if (task.propertyId) {
+      this.assertPropertyAccess(user, task.propertyId, 'اعتماد مهمة', 'TaskItem', task.id, deviceName);
+    } else if (!userHasAllPropertiesAccess(this.state, user)) {
+      const msg = 'رفض مراجعة مهمة خارج نطاقك';
+      this.recordDeniedAccess(user, 'رفض وصول خارج النطاق', 'TaskItem', task.id, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     const oldStatus = task.status;
     const now = new Date().toISOString();
     const assignee = this.state.users.find((u) => u.id === task.assignedTo);
@@ -2599,23 +2801,27 @@ export class AqarStore {
   }
 
   public addDocument(userId: string, input: Omit<DocumentRecord, 'id' | 'uploadedBy' | 'createdAt'>, deviceName?: string): DocumentRecord {
-    const user = this.assertPermission(userId, 'manage_documents');
+    const user = this.assertPermission(userId, 'manage_documents', { entityType: 'Document', propertyId: input.propertyId, deviceName });
     const doc: DocumentRecord = {
       ...input,
       id: uid('doc'),
       uploadedBy: user.id,
       createdAt: new Date().toISOString(),
     };
+    this.assertDocumentAccess(user, doc, 'أرشفة مستند', deviceName);
     const writtenPath = this.writeDocumentToDisk(doc);
     if (writtenPath) doc.diskPath = writtenPath;
     this.state.documents.unshift(doc);
-    this.addAudit(user, 'أرشفة مستند', 'Document', doc.id, `رفع المستند "${doc.title}" (${doc.category})`, { deviceName });
+    this.addAudit(user, 'أرشفة مستند', 'Document', doc.id, `رفع المستند "${doc.title}" (${doc.category})`, {
+      propertyId: this.resolveDocumentPropertyId(doc),
+      deviceName,
+    });
     this.persist();
     return doc;
   }
 
   public createVendor(userId: string, input: Omit<Vendor, 'id'>, deviceName?: string): Vendor {
-    const user = this.assertPermission(userId, 'manage_maintenance');
+    const user = this.assertPermission(userId, 'manage_maintenance', { entityType: 'Vendor', deviceName });
     const vendor: Vendor = { ...input, id: uid('vnd') };
     this.state.vendors.push(vendor);
     this.addAudit(user, 'إضافة مقاول/مورد', 'Vendor', vendor.id, `إضافة المورد ${vendor.nameAr}`, { deviceName });
@@ -2624,15 +2830,21 @@ export class AqarStore {
   }
 
   public toggleRolePermission(userId: string, role: RoleKey, permission: PermissionKey, deviceName?: string): Record<RoleKey, PermissionKey[]> {
-    const user = this.assertPermission(userId, 'manage_users');
+    const user = this.assertPermission(userId, 'manage_users', { entityType: 'RolePermissions', entityId: role, deviceName });
     if (user.role !== 'sys_owner' && user.role !== 'gm') {
-      throw new Error('تعديل مصفوفة الصلاحيات متاح لمالك النظام أو مدير الشركة فقط');
+      const msg = 'تعديل مصفوفة الصلاحيات متاح لمالك النظام أو مدير الشركة فقط';
+      this.recordDeniedAccess(user, 'رفض تعديل صلاحيات دور', 'RolePermissions', role, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
     }
     if (user.role === role) {
-      throw new Error('لا يمكن لأي مستخدم تعديل صلاحيات دوره الحالي لضمان الحوكمة');
+      const msg = 'لا يمكن لأي مستخدم تعديل صلاحيات دوره الحالي لضمان الحوكمة';
+      this.recordDeniedAccess(user, 'رفض تعديل الصلاحيات الذاتية', 'RolePermissions', role, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
     }
     if (user.role === 'gm' && (role === 'sys_owner' || role === 'gm')) {
-      throw new Error('يستطيع مدير الشركة تعديل صلاحيات الموظفين التابعين له فقط');
+      const msg = 'يستطيع مدير الشركة تعديل صلاحيات الموظفين التابعين له فقط';
+      this.recordDeniedAccess(user, 'رفض تجاوز التسلسل الوظيفي', 'RolePermissions', role, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
     }
     if (role === 'sys_owner' && permission === 'manage_users') {
       throw new Error('لا يمكن سحب صلاحية إدارة المستخدمين من مالك النظام');
@@ -2745,6 +2957,8 @@ export class AqarStore {
     }
 
     const currentBackups = this.state.backups;
+    const currentAuditLogs = [...this.state.auditLogs];
+    const currentAuditIds = new Set(currentAuditLogs.map((a) => a.id));
 
     if (mode === 'merge') {
       const mergeArrays = <T extends { id: string }>(current: T[] = [], incoming: T[] = []): T[] => {
@@ -2792,13 +3006,19 @@ export class AqarStore {
     } else {
       this.state = restored;
       this.state.backups = currentBackups;
+      // Immutable audit log invariant: never erase existing audit entries on restore
+      const restoredAudits = Array.isArray(restored.auditLogs) ? restored.auditLogs : [];
+      this.state.auditLogs = [
+        ...currentAuditLogs,
+        ...restoredAudits.filter((a) => !currentAuditIds.has(a.id)),
+      ].slice(0, 500);
       this.sqlite.ensureSeedCredentials(this.state.users);
       this.addAudit(
         user,
         'استعادة نسخة احتياطية (استبدال كامل)',
         'Backup',
         backupId,
-        'تمت استعادة النظام واستبدال الحالة الحالية بالنسخة المختارة',
+        'تمت استعادة النظام واستبدال الحالة الحالية بالنسخة المختارة مع الحفاظ على سجل التدقيق',
         { deviceName }
       );
     }
@@ -3033,7 +3253,12 @@ export class AqarStore {
 
   // 10. Multi-Company & Settings Management
   public createCompany(userId: string, input: Omit<CompanyProfile, 'id'>, deviceName?: string): CompanyProfile {
-    const user = this.assertPermission(userId, 'manage_users');
+    const user = this.assertPermission(userId, 'manage_users', { entityType: 'CompanyProfile', deviceName });
+    if (user.role !== 'sys_owner') {
+      const msg = 'إنشاء شركة عقارية أو فرع جديد محصور بمالك النظام فقط';
+      this.recordDeniedAccess(user, 'رفض إنشاء شركة جديدة', 'CompanyProfile', 'create', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     if (!this.state.companies) this.state.companies = [];
     const comp: CompanyProfile = {
       ...input,
@@ -3048,7 +3273,12 @@ export class AqarStore {
   }
 
   public updateSettings(userId: string, patch: Partial<CompanySettings>, deviceName?: string): CompanySettings {
-    const user = this.assertPermission(userId, 'manage_users');
+    const user = this.assertPermission(userId, 'manage_users', { entityType: 'CompanySettings', entityId: 'settings', deviceName });
+    if (user.role !== 'sys_owner' && user.role !== 'gm') {
+      const msg = 'تعديل إعدادات الشركة متاح لمالك النظام أو مدير الشركة فقط';
+      this.recordDeniedAccess(user, 'رفض تعديل إعدادات الشركة', 'CompanySettings', 'settings', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     const prev = this.state.settings;
     this.state.settings = {
       ...prev,
@@ -3113,6 +3343,23 @@ export class AqarStore {
     return this.state.settings;
   }
 
+  public getAuthorizedDocument(
+    userId: string,
+    docId: string,
+    action: PermissionLevel = 'view',
+    deviceName?: string
+  ): DocumentRecord {
+    const user = this.assertModuleAction(userId, 'documents', action, {
+      entityType: 'Document',
+      entityId: docId,
+      deviceName,
+    });
+    const doc = this.state.documents.find((d) => d.id === docId);
+    if (!doc) throw new Error('المستند غير موجود');
+    this.assertDocumentAccess(user, doc, 'الوصول إلى المستند', deviceName);
+    return doc;
+  }
+
   // 11. Document Archive Access Log & OCR Attachment
   public recordDocumentAccess(
     userId: string,
@@ -3120,9 +3367,10 @@ export class AqarStore {
     action: DocumentAccessEntry['action'],
     deviceName?: string
   ): DocumentRecord {
-    const user = this.getActingUser(userId);
+    const user = this.assertModuleAction(userId, 'documents', 'view', { entityType: 'Document', entityId: docId, deviceName });
     const doc = this.state.documents.find((d) => d.id === docId);
     if (!doc) throw new Error('المستند غير موجود');
+    this.assertDocumentAccess(user, doc, `${action} مستند`, deviceName);
     if (!doc.accessLog) doc.accessLog = [];
     const entry: DocumentAccessEntry = {
       id: uid('dacc'),
@@ -3134,7 +3382,10 @@ export class AqarStore {
     };
     doc.accessLog.unshift(entry);
     if (doc.accessLog.length > 50) doc.accessLog = doc.accessLog.slice(0, 50);
-    this.addAudit(user, `${action} مستند`, 'Document', doc.id, `${action} المستند "${doc.title}"`, { deviceName });
+    this.addAudit(user, `${action} مستند`, 'Document', doc.id, `${action} المستند "${doc.title}"`, {
+      propertyId: this.resolveDocumentPropertyId(doc),
+      deviceName,
+    });
     this.persist();
     return doc;
   }
@@ -3146,9 +3397,10 @@ export class AqarStore {
     ocrRawText: string,
     deviceName?: string
   ): DocumentRecord {
-    const user = this.assertPermission(userId, 'manage_documents');
+    const user = this.assertPermission(userId, 'manage_documents', { entityType: 'Document', entityId: docId, deviceName });
     const doc = this.state.documents.find((d) => d.id === docId);
     if (!doc) throw new Error('المستند غير موجود');
+    this.assertDocumentAccess(user, doc, 'تحليل OCR للمستند', deviceName);
     doc.ocrStatus = 'تم الاستخراج آلياً';
     doc.ocrExtracted = ocrExtracted;
     doc.ocrRawText = ocrRawText;
@@ -3174,9 +3426,21 @@ export class AqarStore {
     deviceName?: string
   ) {
     return this.runTransaction(() => {
-    const user = this.assertPermission(userId, 'manage_accounting');
+    const user = this.assertPermission(userId, 'manage_accounting', { entityType: 'Owner', entityId: ownerId, deviceName });
     const owner = this.state.owners.find((o) => o.id === ownerId);
     if (!owner) throw new Error('المالك غير موجود');
+    if (!userHasAllPropertiesAccess(this.state, user)) {
+      const scope = getAccessiblePropertyIdsSet(this.state, user);
+      const hasAccessibleShare =
+        (this.state.properties || []).some(
+          (p) => scope.has(p.id) && (p.ownerShares || []).some((s) => s.ownerId === ownerId)
+        ) || (this.state.ownerShares || []).some((s) => s.ownerId === ownerId && scope.has(s.propertyId));
+      if (!hasAccessibleShare) {
+        const msg = 'رفض تحويل مستحقات مالك: المالك خارج نطاق عقاراتك أو شركتك';
+        this.recordDeniedAccess(user, 'رفض وصول خارج النطاق', 'Owner', ownerId, msg, { deviceName });
+        throw new PermissionDeniedError(msg);
+      }
+    }
     if (!input.amount || input.amount <= 0) throw new Error('يجب إدخال مبلغ تحويل أكبر من صفر');
 
     const curr: CurrencyCode = input.currency || 'SAR';
@@ -3246,9 +3510,10 @@ export class AqarStore {
     deviceName?: string
   ): { contract: LeaseContract; installments: Installment[] } {
     return this.runTransaction(() => {
-    const user = this.assertPermission(userId, 'manage_contracts');
+    const user = this.assertPermission(userId, 'manage_contracts', { entityType: 'LeaseContract', entityId: contractId, deviceName });
     const prev = this.contractIndex.get(contractId) || this.state.contracts.find((c) => c.id === contractId);
     if (!prev) throw new Error('العقد الأساسي غير موجود');
+    this.assertPropertyAccess(user, prev.propertyId, 'تجديد عقد', 'LeaseContract', prev.id, deviceName);
 
     if (prev.lifecycleStatus === 'نشط' || prev.lifecycleStatus === 'بانتظار التجديد') {
       prev.lifecycleStatus = 'منتهي';
@@ -3341,7 +3606,8 @@ export class AqarStore {
     input: Omit<PurchaseOrder, 'id' | 'poNumber' | 'createdBy' | 'createdAt'>,
     deviceName?: string
   ): PurchaseOrder {
-    const user = this.assertPermission(userId, 'manage_maintenance');
+    const user = this.assertPermission(userId, 'manage_maintenance', { entityType: 'PurchaseOrder', propertyId: input.propertyId, deviceName });
+    this.assertPropertyAccess(user, input.propertyId, 'إنشاء طلب شراء', 'PurchaseOrder', input.propertyId || 'unscoped', deviceName);
     if (!this.state.purchaseOrders) this.state.purchaseOrders = [];
     const po: PurchaseOrder = {
       ...input,
@@ -3352,6 +3618,7 @@ export class AqarStore {
     };
     this.state.purchaseOrders.unshift(po);
     this.addAudit(user, 'إنشاء طلب شراء ومقارنة عروض', 'PurchaseOrder', po.id, `إنشاء ${po.poNumber}: ${po.title}`, {
+      propertyId: po.propertyId,
       deviceName,
     });
     this.persist();
@@ -3364,21 +3631,24 @@ export class AqarStore {
     patch: Partial<Pick<PurchaseOrder, 'status' | 'selectedVendorId' | 'approvedAmount' | 'quotes'>>,
     deviceName?: string
   ): PurchaseOrder {
-    const user = this.getActingUser(userId);
+    const user = this.assertPermission(userId, 'manage_maintenance', { entityType: 'PurchaseOrder', entityId: poId, deviceName });
     if (!this.state.purchaseOrders) this.state.purchaseOrders = [];
     const po = this.state.purchaseOrders.find((p) => p.id === poId);
     if (!po) throw new Error('طلب الشراء غير موجود');
+    this.assertPropertyAccess(user, po.propertyId, 'تحديث طلب شراء', 'PurchaseOrder', po.id, deviceName);
 
     if (patch.status) po.status = patch.status;
     if (patch.selectedVendorId) po.selectedVendorId = patch.selectedVendorId;
     if (typeof patch.approvedAmount === 'number') po.approvedAmount = patch.approvedAmount;
     if (patch.quotes) po.quotes = patch.quotes;
     if (patch.status === 'معتمد' || patch.status === 'أمر شراء') {
+      this.assertPermission(userId, 'approve_expense_supervisor', { entityType: 'PurchaseOrder', entityId: po.id, propertyId: po.propertyId, deviceName });
       po.approvedBy = user.id;
     }
 
     this.addAudit(user, 'تحديث طلب شراء', 'PurchaseOrder', po.id, `تحديث ${po.poNumber} إلى الحالة: ${po.status}`, {
       deviceName,
+      propertyId: po.propertyId,
       newValue: po.status,
     });
     this.persist();
@@ -3391,7 +3661,15 @@ export class AqarStore {
     input: Omit<ExecutiveDecision, 'id' | 'decisionNumber' | 'issuedBy' | 'issuedByName' | 'createdAt'>,
     deviceName?: string
   ): ExecutiveDecision {
-    const user = this.assertPermission(userId, 'manage_users');
+    const user = this.assertPermission(userId, 'manage_users', { entityType: 'ExecutiveDecision', deviceName });
+    if (user.role !== 'sys_owner' && user.role !== 'gm') {
+      const msg = 'إصدار القرارات التنفيذية محصور بمالك النظام أو المدير العام';
+      this.recordDeniedAccess(user, 'رفض إصدار قرار تنفيذي', 'ExecutiveDecision', 'create', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+    if (input.propertyId) {
+      this.assertPropertyAccess(user, input.propertyId, 'إصدار قرار تنفيذي', 'ExecutiveDecision', input.propertyId, deviceName);
+    }
     if (!this.state.decisions) this.state.decisions = [];
     const dec: ExecutiveDecision = {
       ...input,
@@ -3403,6 +3681,7 @@ export class AqarStore {
     };
     this.state.decisions.unshift(dec);
     this.addAudit(user, 'إصدار قرار إداري', 'ExecutiveDecision', dec.id, `${dec.decisionNumber}: ${dec.title}`, {
+      propertyId: dec.propertyId,
       deviceName,
     });
     this.addNotification(
@@ -3425,9 +3704,8 @@ export class AqarStore {
     checklist: TenantOnboardingChecklist,
     deviceName?: string
   ): Tenant {
-    const user = this.assertPermission(userId, 'manage_tenants');
-    const tenant = this.state.tenants.find((t) => t.id === tenantId);
-    if (!tenant) throw new Error('المستأجر غير موجود');
+    const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Tenant', entityId: tenantId, deviceName });
+    const tenant = this.assertTenantAccess(user, tenantId, 'تحديث قائمة سياسة التسكين', deviceName);
     tenant.onboardingChecklist = checklist;
     const completedCount = Object.values(checklist).filter(Boolean).length;
     this.addAudit(
@@ -3456,7 +3734,12 @@ export class AqarStore {
     let skipped = 0;
 
     if (type === 'tenants') {
-      const user = this.assertPermission(userId, 'manage_tenants');
+      const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Tenant', entityId: 'bulk', deviceName });
+      if (!userHasAllPropertiesAccess(this.state, user) && getAccessiblePropertyIdsSet(this.state, user).size === 0) {
+        const msg = 'رفض الاستيراد الجماعي للمستأجرين: لا توجد عقارات مصرح بها في حسابك';
+        this.recordDeniedAccess(user, 'رفض استيراد بدون نطاق عقارات', 'Tenant', 'bulk', msg, { deviceName });
+        throw new PermissionDeniedError(msg);
+      }
       for (const r of rows) {
         const nameAr = String(r.nameAr || r['الاسم'] || r['اسم المستأجر'] || '').trim();
         const nationalIdOrIqama = String(r.nationalIdOrIqama || r['رقم الهوية'] || r['الهوية'] || '').trim();
@@ -3470,7 +3753,7 @@ export class AqarStore {
           skipped += 1;
           continue;
         }
-        this.state.tenants.push({
+        const tenantObj: Tenant = {
           id: uid('ten'),
           nameAr,
           nameEn: String(r.nameEn || r['الاسم بالإنجليزية'] || nameAr),
@@ -3490,7 +3773,9 @@ export class AqarStore {
             handoverSigned: false,
           },
           createdAt: new Date().toISOString(),
-        });
+        };
+        (tenantObj as any).companyId = user.companyId || this.getWorkspaceCompanyId();
+        this.state.tenants.push(tenantObj);
         inserted += 1;
       }
       this.addAudit(
@@ -3502,15 +3787,25 @@ export class AqarStore {
         { deviceName }
       );
     } else {
-      const user = this.assertPermission(userId, 'manage_properties');
-      const fallbackPropId = this.state.properties[0]?.id;
+      const user = this.assertPermission(userId, 'manage_properties', { entityType: 'Unit', entityId: 'bulk', deviceName });
+      const accessibleProps = this.state.properties.filter((p) => canUserAccessProperty(this.state, user, p.id));
+      if (accessibleProps.length === 0) {
+        const msg = 'رفض الاستيراد الجماعي للوحدات: لا توجد عقارات مصرح لك بها';
+        this.recordDeniedAccess(user, 'رفض استيراد بدون نطاق عقارات', 'Unit', 'bulk', msg, { deviceName });
+        throw new PermissionDeniedError(msg);
+      }
+      const fallbackPropId = accessibleProps[0]?.id;
       for (const r of rows) {
         const unitNumber = String(r.unitNumber || r['رقم الوحدة'] || r['الوحدة'] || '').trim();
         const propNameOrId = String(r.propertyId || r['العقار'] || '').trim();
-        const prop =
-          this.state.properties.find((p) => p.id === propNameOrId || p.nameAr === propNameOrId) ||
-          this.state.properties.find((p) => p.id === fallbackPropId);
+        const prop = propNameOrId
+          ? this.state.properties.find((p) => p.id === propNameOrId || p.nameAr === propNameOrId)
+          : this.state.properties.find((p) => p.id === fallbackPropId);
         if (!unitNumber || !prop) {
+          skipped += 1;
+          continue;
+        }
+        if (!canUserAccessProperty(this.state, user, prop.id)) {
           skipped += 1;
           continue;
         }
@@ -3558,9 +3853,14 @@ export class AqarStore {
   }
 
   // 18. Gemini OCR Entity Matching & Automatic Field Sync (Tenants & Properties)
-  public findOcrEntityMatches(extracted: OcrExtractedData): OcrEntityMatchResult {
+  public findOcrEntityMatches(extracted: OcrExtractedData, actorUserId?: string): OcrEntityMatchResult {
     const cleanDigits = (s?: string) => (s || '').replace(/\D+/g, '');
     const norm = (s?: string) => (s || '').trim().toLowerCase();
+
+    const scopedView = actorUserId ? this.getStateForUser(actorUserId) : this.state;
+    const candidateTenants = scopedView.tenants;
+    const candidateProperties = scopedView.properties;
+    const candidateUnits = scopedView.units;
 
     const idDigits = cleanDigits(extracted.nationalIdOrIqama);
     const phoneDigits = cleanDigits(extracted.phone);
@@ -3569,15 +3869,15 @@ export class AqarStore {
     let matchedTenant: Tenant | undefined;
     let tenantReason = '';
     if (idDigits.length >= 6) {
-      matchedTenant = this.state.tenants.find((t) => cleanDigits(t.nationalIdOrIqama) === idDigits);
+      matchedTenant = candidateTenants.find((t) => cleanDigits(t.nationalIdOrIqama) === idDigits);
       if (matchedTenant) tenantReason = 'مطابقة رقم الهوية / الإقامة';
     }
     if (!matchedTenant && phoneDigits.length >= 8) {
-      matchedTenant = this.state.tenants.find((t) => cleanDigits(t.phone).endsWith(phoneDigits.slice(-9)));
+      matchedTenant = candidateTenants.find((t) => cleanDigits(t.phone).endsWith(phoneDigits.slice(-9)));
       if (matchedTenant) tenantReason = 'مطابقة رقم الجوال';
     }
     if (!matchedTenant && tenantNameNorm.length >= 4) {
-      matchedTenant = this.state.tenants.find(
+      matchedTenant = candidateTenants.find(
         (t) => norm(t.nameAr) === tenantNameNorm || norm(t.nameAr).includes(tenantNameNorm) || tenantNameNorm.includes(norm(t.nameAr))
       );
       if (matchedTenant) tenantReason = 'مطابقة الاسم بالعربية';
@@ -3614,11 +3914,11 @@ export class AqarStore {
     let propertyReason = '';
 
     if (deedDigits.length >= 4) {
-      matchedProperty = this.state.properties.find((p) => cleanDigits(p.deedNumber) === deedDigits);
+      matchedProperty = candidateProperties.find((p) => cleanDigits(p.deedNumber) === deedDigits);
       if (matchedProperty) propertyReason = 'مطابقة رقم الصك';
     }
     if (!matchedProperty && propNameNorm.length >= 3) {
-      matchedProperty = this.state.properties.find(
+      matchedProperty = candidateProperties.find(
         (p) => norm(p.nameAr) === propNameNorm || norm(p.nameAr).includes(propNameNorm) || propNameNorm.includes(norm(p.nameAr))
       );
       if (matchedProperty) propertyReason = 'مطابقة اسم العقار';
@@ -3636,7 +3936,7 @@ export class AqarStore {
     let matchedUnit: Unit | undefined;
     if (extracted.unitNumber) {
       const unitNumNorm = norm(extracted.unitNumber);
-      matchedUnit = this.state.units.find(
+      matchedUnit = candidateUnits.find(
         (u) => (!matchedProperty || u.propertyId === matchedProperty.id) && norm(u.unitNumber) === unitNumNorm
       );
     }
@@ -3693,9 +3993,14 @@ export class AqarStore {
     property?: Property;
     doc?: DocumentRecord;
   } {
-    const user = this.assertPermission(userId, 'manage_documents');
+    const user = this.assertPermission(userId, 'manage_documents', { entityType: 'Document', entityId: input.docId || 'ocr', deviceName });
+    if (input.docId) {
+      const targetDoc = this.state.documents.find((d) => d.id === input.docId);
+      if (!targetDoc) throw new Error('المستند غير موجود');
+      this.assertDocumentAccess(user, targetDoc, 'ربط نتائج OCR', deviceName);
+    }
     const extracted = input.extracted;
-    const matches = this.findOcrEntityMatches(extracted);
+    const matches = this.findOcrEntityMatches(extracted, userId);
     const summary: OcrSyncSummary = {
       tenantAction: 'skipped',
       tenantUpdatedFields: [],
@@ -3710,7 +4015,7 @@ export class AqarStore {
     if (input.applyTenant !== false) {
       const targetId = input.targetTenantId || matches.matchedTenant?.id;
       if (targetId) {
-        const tenant = this.state.tenants.find((t) => t.id === targetId);
+        const tenant = this.assertTenantAccess(user, targetId, 'ربط OCR بمستأجر', deviceName);
         if (tenant) {
           const updatedFields: string[] = [];
           if (extracted.tenantNameAr?.trim() && (!tenant.nameAr || tenant.nameAr.length < 3)) {
@@ -3811,6 +4116,7 @@ export class AqarStore {
     if (input.applyProperty !== false) {
       const targetPropId = input.targetPropertyId || matches.matchedProperty?.id;
       if (targetPropId) {
+        this.assertPropertyAccess(user, targetPropId, 'ربط OCR بعقار', 'Property', targetPropId, deviceName);
         const prop = this.state.properties.find((p) => p.id === targetPropId);
         if (prop) {
           const updatedFields: string[] = [];
@@ -3914,7 +4220,12 @@ export class AqarStore {
   }
 
   public resetToFreshWorkspace(userId: string, deviceName?: string): AqarDatabaseState {
-    const user = this.assertPermission(userId, 'manage_properties');
+    const user = this.assertPermission(userId, 'manage_users', { entityType: 'Workspace', entityId: 'reset', deviceName });
+    if (user.role !== 'sys_owner') {
+      const msg = 'إعادة تهيئة مساحة العمل صلاحية حصرية لمالك النظام فقط';
+      this.recordDeniedAccess(user, 'رفض إعادة تهيئة مساحة العمل', 'Workspace', 'reset', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
+    }
     if (this.state.properties.length > 0 || this.state.payments.length > 0) {
       this.createBackup(userId, 'نسخة تلقائية قبل الإعداد الأولي', deviceName);
     }
@@ -3979,12 +4290,21 @@ export class AqarStore {
       auditor: ['contracts', 'tenants', 'receipts', 'tickets', 'documents', 'units'],
       owner: ['contracts', 'receipts', 'units'],
     };
+    if (!userHasModuleAction(this.state, user, 'archive', 'view')) {
+      const msg = `لا تملك صلاحية الوصول إلى قسم الأرشيف (${category})`;
+      this.recordDeniedAccess(user, 'رفض وصول للأرشيف', 'SmartArchive', category, msg);
+      throw new PermissionDeniedError(msg);
+    }
     const allowed = allowedByRole[user.role] || [];
     if (!allowed.includes(category)) {
-      throw new Error(`لا تملك صلاحية الوصول إلى قسم الأرشيف (${category})`);
+      const msg = `لا تملك صلاحية الوصول إلى قسم الأرشيف (${category})`;
+      this.recordDeniedAccess(user, 'رفض وصول لقسم أرشيف', 'SmartArchive', category, msg);
+      throw new PermissionDeniedError(msg);
     }
     if (action === 'write' && (user.role === 'owner' || user.role === 'auditor' || (user.role === 'leasing' && category !== 'tenants'))) {
-      throw new Error('صلاحيتك في هذا القسم للعرض المرجعي فقط');
+      const msg = 'صلاحيتك في هذا القسم للعرض المرجعي فقط';
+      this.recordDeniedAccess(user, 'رفض تعديل الأرشيف', 'SmartArchive', category, msg);
+      throw new PermissionDeniedError(msg);
     }
   }
 
@@ -4003,6 +4323,7 @@ export class AqarStore {
       if (input.category === 'contracts') {
         const ctr = this.state.contracts.find((c) => c.id === input.entityId);
         if (!ctr) throw new Error('العقد غير موجود');
+        this.assertPropertyAccess(user, ctr.propertyId, 'أرشفة عقد', 'LeaseContract', ctr.id, deviceName);
         ctr.preArchiveStatus = ctr.lifecycleStatus;
         if (ctr.lifecycleStatus === 'نشط' || ctr.lifecycleStatus === 'بانتظار التجديد' || ctr.lifecycleStatus === 'بانتظار التوثيق') {
           ctr.lifecycleStatus = 'منتهي';
@@ -4018,8 +4339,7 @@ export class AqarStore {
         ctr.archiveReason = reason;
         summary = `أرشفة العقد ${ctr.internalNumber}`;
       } else if (input.category === 'tenants') {
-        const ten = this.state.tenants.find((t) => t.id === input.entityId);
-        if (!ten) throw new Error('المستأجر غير موجود');
+        const ten = this.assertTenantAccess(user, input.entityId, 'أرشفة مستأجر', deviceName);
         const hasActiveCtr = this.state.contracts.some(
           (c) => c.tenantId === ten.id && (c.lifecycleStatus === 'نشط' || c.lifecycleStatus === 'بانتظار التوثيق')
         );
@@ -4034,6 +4354,7 @@ export class AqarStore {
       } else if (input.category === 'receipts') {
         const pay = this.state.payments.find((p) => p.id === input.entityId);
         if (!pay) throw new Error('الإيصال غير موجود');
+        this.assertPropertyAccess(user, pay.propertyId, 'أرشفة إيصال', 'Payment', pay.id, deviceName);
         pay.preArchiveStatus = pay.status;
         pay.archivedAt = now;
         pay.archivedBy = user.id;
@@ -4044,6 +4365,7 @@ export class AqarStore {
         if (input.targetKind === 'task') {
           const tsk = this.state.tasks.find((t) => t.id === input.entityId);
           if (!tsk) throw new Error('المهمة غير موجودة');
+          if (tsk.propertyId) this.assertPropertyAccess(user, tsk.propertyId, 'أرشفة مهمة', 'TaskItem', tsk.id, deviceName);
           tsk.preArchiveStatus = tsk.status;
           tsk.status = 'مكتملة';
           tsk.archivedAt = now;
@@ -4054,6 +4376,7 @@ export class AqarStore {
         } else {
           const tkt = this.state.tickets.find((t) => t.id === input.entityId);
           if (!tkt) throw new Error('البلاغ غير موجود');
+          this.assertPropertyAccess(user, tkt.propertyId, 'أرشفة بلاغ صيانة', 'MaintenanceTicket', tkt.id, deviceName);
           tkt.preArchiveStatus = tkt.status;
           if (tkt.status !== 'مكتمل' && tkt.status !== 'مغلق') tkt.status = 'مغلق';
           tkt.archivedAt = now;
@@ -4065,6 +4388,7 @@ export class AqarStore {
       } else if (input.category === 'documents') {
         const doc = this.state.documents.find((d) => d.id === input.entityId);
         if (!doc) throw new Error('المستند غير موجود');
+        this.assertDocumentAccess(user, doc, 'أرشفة مستند', deviceName);
         doc.preArchiveStatus = 'نشط';
         doc.archivedAt = now;
         doc.archivedBy = user.id;
@@ -4074,6 +4398,7 @@ export class AqarStore {
       } else if (input.category === 'units') {
         const unit = this.state.units.find((u) => u.id === input.entityId);
         if (!unit) throw new Error('الوحدة غير موجودة');
+        this.assertPropertyAccess(user, unit.propertyId, 'أرشفة وحدة', 'Unit', unit.id, deviceName);
         const hasActiveCtr = this.state.contracts.some(
           (c) => c.unitId === unit.id && (c.lifecycleStatus === 'نشط' || c.lifecycleStatus === 'بانتظار التوثيق')
         );
@@ -4119,6 +4444,7 @@ export class AqarStore {
       if (input.category === 'contracts') {
         const ctr = this.state.contracts.find((c) => c.id === input.entityId);
         if (!ctr) throw new Error('العقد غير موجود');
+        this.assertPropertyAccess(user, ctr.propertyId, 'استعادة عقد', 'LeaseContract', ctr.id, deviceName);
         const conflictingActive = this.state.contracts.find(
           (c) =>
             c.id !== ctr.id &&
@@ -4151,8 +4477,7 @@ export class AqarStore {
           restoredSummary = `استعادة العقد ${ctr.internalNumber} إلى قائمة العقود (${ctr.lifecycleStatus})`;
         }
       } else if (input.category === 'tenants') {
-        const ten = this.state.tenants.find((t) => t.id === input.entityId);
-        if (!ten) throw new Error('المستأجر غير موجود');
+        const ten = this.assertTenantAccess(user, input.entityId, 'استعادة مستأجر', deviceName);
         ten.classification = ten.preArchiveStatus === 'محتمل' ? 'محتمل' : 'نشط';
         ten.archivedAt = undefined;
         ten.archiveReason = undefined;
@@ -4160,6 +4485,7 @@ export class AqarStore {
       } else if (input.category === 'receipts') {
         const pay = this.state.payments.find((p) => p.id === input.entityId);
         if (!pay) throw new Error('الإيصال غير موجود');
+        this.assertPropertyAccess(user, pay.propertyId, 'استعادة إيصال', 'Payment', pay.id, deviceName);
         if (pay.status === 'معكوس') {
           referenceOnly = true;
           pay.archivedAt = undefined;
@@ -4173,6 +4499,7 @@ export class AqarStore {
         if (input.targetKind === 'task') {
           const tsk = this.state.tasks.find((t) => t.id === input.entityId);
           if (!tsk) throw new Error('المهمة غير موجودة');
+          if (tsk.propertyId) this.assertPropertyAccess(user, tsk.propertyId, 'استعادة مهمة', 'TaskItem', tsk.id, deviceName);
           tsk.status = 'قيد التنفيذ';
           tsk.archivedAt = undefined;
           tsk.archiveReason = undefined;
@@ -4180,6 +4507,7 @@ export class AqarStore {
         } else {
           const tkt = this.state.tickets.find((t) => t.id === input.entityId);
           if (!tkt) throw new Error('البلاغ غير موجود');
+          this.assertPropertyAccess(user, tkt.propertyId, 'استعادة بلاغ صيانة', 'MaintenanceTicket', tkt.id, deviceName);
           tkt.status = 'قيد التنفيذ';
           tkt.archivedAt = undefined;
           tkt.archiveReason = undefined;
@@ -4189,12 +4517,14 @@ export class AqarStore {
       } else if (input.category === 'documents') {
         const doc = this.state.documents.find((d) => d.id === input.entityId);
         if (!doc) throw new Error('المستند غير موجود');
+        this.assertDocumentAccess(user, doc, 'استعادة مستند', deviceName);
         doc.archivedAt = undefined;
         doc.archiveReason = undefined;
         restoredSummary = `استعادة المستند "${doc.title}" للمستندات النشطة`;
       } else if (input.category === 'units') {
         const unit = this.state.units.find((u) => u.id === input.entityId);
         if (!unit) throw new Error('الوحدة غير موجودة');
+        this.assertPropertyAccess(user, unit.propertyId, 'استعادة وحدة', 'Unit', unit.id, deviceName);
         unit.status = 'شاغرة';
         unit.vacantSince = new Date().toISOString().slice(0, 10);
         unit.archivedAt = undefined;
@@ -4214,7 +4544,12 @@ export class AqarStore {
 
   public runScheduledArchival(userId: string, deviceName?: string): { archivedCount: number; summary: string } {
     return this.runTransaction(() => {
-      const user = this.assertPermission(userId, 'manage_contracts');
+      const user = this.assertPermission(userId, 'manage_contracts', { entityType: 'SmartArchive', entityId: 'nightly-job', deviceName });
+      if (user.role !== 'sys_owner' && user.role !== 'gm') {
+        const msg = 'تشغيل الأرشفة الليلية الشاملة متاح لمالك النظام أو المدير العام فقط';
+        this.recordDeniedAccess(user, 'رفض تشغيل الأرشفة المجدولة', 'SmartArchive', 'nightly-job', msg, { deviceName });
+        throw new PermissionDeniedError(msg);
+      }
       const now = new Date();
       const nowIso = now.toISOString();
       const todayStr = nowIso.slice(0, 10);
@@ -4327,9 +4662,11 @@ export class AqarStore {
     },
     deviceName?: string
   ): StaffUser {
-    const actor = this.assertPermission(userId, 'manage_users');
+    const actor = this.assertPermission(userId, 'manage_users', { entityType: 'StaffUser', deviceName });
     if (actor.role !== 'sys_owner') {
-      throw new Error('إنشاء المستخدمين الجدد صلاحية حصرية لمالك النظام (System Owner) فقط');
+      const msg = 'إنشاء المستخدمين الجدد صلاحية حصرية لمالك النظام (System Owner) فقط';
+      this.recordDeniedAccess(actor, 'رفض إنشاء مستخدم', 'StaffUser', 'create', msg, { deviceName });
+      throw new PermissionDeniedError(msg);
     }
     if (!input.nameAr?.trim() || !input.phone?.trim()) {
       throw new Error('الاسم الكامل ورقم الجوال مطلوبان لإضافة الموظف');
@@ -4337,6 +4674,7 @@ export class AqarStore {
     const now = new Date().toISOString();
     const newUser: StaffUser = {
       id: uid('usr'),
+      companyId: (input as any).companyId || actor.companyId || this.getWorkspaceCompanyId(),
       nameAr: input.nameAr.trim(),
       nameEn: (input.nameEn || input.nameAr).trim(),
       role: input.role,
@@ -4346,12 +4684,13 @@ export class AqarStore {
       phone: input.phone.trim(),
       approvalLimitSar: Number(input.approvalLimitSar || 0),
       active: true,
+      accountStatus: 'نشط',
       deviceName: 'جهاز مسجل جديد · ويب/جوال',
       lastActiveAt: now,
       statusState: 'متصل',
       specialty: input.specialty?.trim() || input.roleLabelAr,
       avatarDataUrl: input.avatarDataUrl,
-      allowedPropertyIds: input.allowedPropertyIds && input.allowedPropertyIds.length > 0 ? input.allowedPropertyIds : undefined,
+      allowedPropertyIds: Array.isArray(input.allowedPropertyIds) ? [...input.allowedPropertyIds] : [],
       customModulePermissions: input.customModulePermissions,
       managerRating: 5,
       lastActivitySummary: 'تم إنشاء الحساب وتفعيل الصلاحيات',
@@ -4373,16 +4712,23 @@ export class AqarStore {
       },
     };
     this.state.users.push(newUser);
+    const tempPassword =
+      (input as { tempPassword?: string }).tempPassword || crypto.randomBytes(12).toString('base64url');
+    const tempPin = (input as { tempPin?: string }).tempPin || String(crypto.randomInt(100000, 1000000));
     this.sqlite.updateUserCredentials(newUser.id, {
-      password: (input as { tempPassword?: string }).tempPassword || 'Aqar@2026',
-      pin: '1234',
+      password: tempPassword,
+      pin: tempPin,
     });
     this.addAudit(
       actor,
       'إضافة موظف جديد',
       'StaffUser',
       newUser.id,
-      `إضافة الموظف ${newUser.nameAr} بدور (${newUser.roleLabelAr})${newUser.allowedPropertyIds ? ` · مقيد بـ ${newUser.allowedPropertyIds.length} عقارات` : ''}`,
+      `إضافة الموظف ${newUser.nameAr} بدور (${newUser.roleLabelAr}) · نطاق العقارات: ${
+        newUser.allowedPropertyIds?.includes(ALL_PROPERTIES_SCOPE)
+          ? 'كافة العقارات'
+          : `${newUser.allowedPropertyIds?.length || 0} عقار`
+      }`,
       { newValue: newUser.roleLabelAr, deviceName }
     );
     this.addNotification(
@@ -4399,12 +4745,14 @@ export class AqarStore {
   }
 
   public deleteStaffUser(userId: string, targetUserId: string, deviceName?: string): { deletedId: string } {
-    const actor = this.assertPermission(userId, 'manage_users');
+    const actor = this.assertPermission(userId, 'manage_users', { entityType: 'StaffUser', entityId: targetUserId, deviceName });
     if (actor.role !== 'sys_owner') {
-      throw new Error('حذف المستخدمين صلاحية حصرية لمالك النظام (System Owner) فقط');
+      const msg = 'حذف المستخدمين صلاحية حصرية لمالك النظام (System Owner) فقط';
+      this.recordDeniedAccess(actor, 'رفض حذف مستخدم', 'StaffUser', targetUserId, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
     }
     if (actor.id === targetUserId) {
-      throw new Error('لا يمكن حذف حسابك الحالي');
+      throw new PermissionDeniedError('لا يمكن حذف حسابك الحالي');
     }
     const target = this.state.users.find((u) => u.id === targetUserId);
     if (!target) throw new Error('الموظف غير موجود');
@@ -4415,6 +4763,7 @@ export class AqarStore {
       }
     }
     this.state.users = this.state.users.filter((u) => u.id !== targetUserId);
+    this.revokeUserSessions(targetUserId);
     this.addAudit(
       actor,
       'حذف حساب مستخدم',
@@ -4462,7 +4811,9 @@ export class AqarStore {
       patch.approvalLimitSar !== undefined;
 
     if (actor.id === targetUserId && touchesPermissionsOrGovernance) {
-      throw new Error('لا يستطيع أي مستخدم تعديل صلاحياته أو دوره الخاص');
+      const msg = 'لا يستطيع أي مستخدم تعديل صلاحياته أو دوره الخاص';
+      this.recordDeniedAccess(actor, 'رفض تعديل الصلاحيات الذاتية', 'StaffUser', targetUserId, msg, { deviceName });
+      throw new PermissionDeniedError(msg);
     }
 
     const isSelfOnlyUpdate =
@@ -4470,21 +4821,37 @@ export class AqarStore {
       !touchesPermissionsOrGovernance &&
       patch.managerRating === undefined;
     if (!isSelfOnlyUpdate) {
-      this.assertPermission(userId, 'manage_users');
+      this.assertPermission(userId, 'manage_users', { entityType: 'StaffUser', entityId: targetUserId, deviceName });
       if (actor.role !== 'sys_owner' && actor.role !== 'gm') {
-        throw new Error('تعديل صلاحيات الموظفين متاح لمالك النظام أو مدير الشركة فقط');
+        const msg = 'تعديل صلاحيات الموظفين متاح لمالك النظام أو مدير الشركة فقط';
+        this.recordDeniedAccess(actor, 'رفض تعديل موظف', 'StaffUser', targetUserId, msg, { deviceName });
+        throw new PermissionDeniedError(msg);
       }
       if (actor.role === 'gm') {
+        if (!canUserAccessCompany(this.state, actor, target.companyId)) {
+          const msg = 'يستطيع مدير الشركة تعديل الموظفين التابعين لشركته فقط';
+          this.recordDeniedAccess(actor, 'رفض تعديل موظف عبر الشركات', 'StaffUser', targetUserId, msg, { deviceName });
+          throw new PermissionDeniedError(msg);
+        }
         if (target.role === 'sys_owner' || target.role === 'gm') {
-          throw new Error('يستطيع مدير الشركة تعديل صلاحيات الموظفين التابعين له فقط');
+          const msg = 'يستطيع مدير الشركة تعديل صلاحيات الموظفين التابعين له فقط';
+          this.recordDeniedAccess(actor, 'رفض تجاوز التسلسل الوظيفي', 'StaffUser', targetUserId, msg, { deviceName });
+          throw new PermissionDeniedError(msg);
         }
         if (patch.role === 'sys_owner' || patch.role === 'gm') {
-          throw new Error('لا يملك مدير الشركة صلاحية ترقية مستخدم إلى مدير شركة أو مالك نظام');
+          const msg = 'لا يملك مدير الشركة صلاحية ترقية مستخدم إلى مدير شركة أو مالك نظام';
+          this.recordDeniedAccess(actor, 'رفض ترقية غير مصرح بها', 'StaffUser', targetUserId, msg, { deviceName });
+          throw new PermissionDeniedError(msg);
         }
       }
     }
 
+    const prevSnapshot: StaffUser = {
+      ...target,
+      allowedPropertyIds: Array.isArray(target.allowedPropertyIds) ? [...target.allowedPropertyIds] : undefined,
+    };
     const oldRole = target.roleLabelAr;
+    const oldRoleKey = target.role;
     if (patch.nameAr !== undefined) target.nameAr = patch.nameAr.trim();
     if (patch.nameEn !== undefined) target.nameEn = patch.nameEn.trim();
     if (patch.email !== undefined) target.email = patch.email.trim();
@@ -4494,11 +4861,14 @@ export class AqarStore {
     if (patch.roleLabelEn !== undefined) target.roleLabelEn = patch.roleLabelEn;
     if (patch.specialty !== undefined) target.specialty = patch.specialty;
     if (patch.approvalLimitSar !== undefined) target.approvalLimitSar = Number(patch.approvalLimitSar);
-    if (patch.active !== undefined) target.active = patch.active;
+    if (patch.active !== undefined) {
+      target.active = patch.active;
+      target.accountStatus = patch.active ? 'نشط' : 'موقوف';
+    }
     if (patch.statusState !== undefined) target.statusState = patch.statusState;
     if (patch.managerRating !== undefined) target.managerRating = Math.min(5, Math.max(1, Number(patch.managerRating)));
     if (patch.allowedPropertyIds !== undefined) {
-      target.allowedPropertyIds = patch.allowedPropertyIds.length > 0 ? patch.allowedPropertyIds : undefined;
+      target.allowedPropertyIds = Array.isArray(patch.allowedPropertyIds) ? [...patch.allowedPropertyIds] : [];
     }
     if (patch.customModulePermissions !== undefined) {
       target.customModulePermissions = patch.customModulePermissions;
@@ -4510,12 +4880,21 @@ export class AqarStore {
       target.notificationPrefs = { ...(target.notificationPrefs || {}), ...patch.notificationPrefs };
     }
 
+    const roleDowngraded = isRoleDowngrade(oldRoleKey, target.role);
+    const scopeShrank = isPropertyScopeShrink(this.state, prevSnapshot, this.state, target);
+    const deactivated = patch.active === false;
+    if (deactivated || roleDowngraded || scopeShrank) {
+      this.revokeUserSessions(target.id);
+    }
+
     this.addAudit(
       actor,
       'تحديث ملف وصلاحيات موظف',
       'StaffUser',
       target.id,
-      `تحديث بيانات/صلاحيات ${target.nameAr}${patch.roleLabelAr ? ` (${oldRole} ← ${patch.roleLabelAr})` : ''}`,
+      `تحديث بيانات/صلاحيات ${target.nameAr}${patch.roleLabelAr ? ` (${oldRole} ← ${patch.roleLabelAr})` : ''}${
+        deactivated || roleDowngraded || scopeShrank ? ' [إنهاء الجلسات تلقائياً]' : ''
+      }`,
       { oldValue: oldRole, newValue: target.roleLabelAr, deviceName }
     );
     this.persist();
@@ -4754,7 +5133,10 @@ export class AqarStore {
     return { added, updated, unchanged };
   }
 
-  public previewBackup(backupId: string, password?: string): BackupPreviewResult {
+  public previewBackup(backupId: string, password?: string, actorUserId?: string): BackupPreviewResult {
+    if (actorUserId) {
+      this.assertPermission(actorUserId, 'backup_restore', { entityType: 'Backup', entityId: backupId });
+    }
     const filePath = this.resolveBackupFile(backupId);
     if (!filePath) {
       return {
@@ -4858,9 +5240,8 @@ export class AqarStore {
     patch: Partial<Omit<Tenant, 'id' | 'createdAt'>>,
     deviceName?: string
   ): Tenant {
-    const user = this.assertPermission(userId, 'manage_tenants');
-    const tenant = this.state.tenants.find((t) => t.id === tenantId);
-    if (!tenant) throw new Error('المستأجر غير موجود');
+    const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Tenant', entityId: tenantId, deviceName });
+    const tenant = this.assertTenantAccess(user, tenantId, 'تحديث بيانات مستأجر', deviceName);
 
     if (patch.nationalIdOrIqama && patch.nationalIdOrIqama.trim() !== tenant.nationalIdOrIqama) {
       const dup = this.state.tenants.find(
@@ -4904,9 +5285,8 @@ export class AqarStore {
     input: { title: string; category: TenantViolationNote['category']; details: string },
     deviceName?: string
   ): TenantViolationNote {
-    const user = this.assertPermission(userId, 'manage_tenants');
-    const tenant = this.state.tenants.find((t) => t.id === tenantId);
-    if (!tenant) throw new Error('المستأجر غير موجود');
+    const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Tenant', entityId: tenantId, deviceName });
+    const tenant = this.assertTenantAccess(user, tenantId, 'إضافة ملاحظة/مخالفة مستأجر', deviceName);
     if (!tenant.violationNotes) tenant.violationNotes = [];
     const entry: TenantViolationNote = {
       id: uid('vn'),
@@ -4931,8 +5311,19 @@ export class AqarStore {
     deviceName?: string
   ): CommunicationLog {
     const user = this.getActingUser(userId);
-    const tenant = this.state.tenants.find((t) => t.id === tenantId);
-    if (!tenant) throw new Error('المستأجر غير موجود');
+    if (
+      !this.userHasPermission(user, 'manage_tenants') &&
+      !this.userHasPermission(user, 'manage_contracts') &&
+      !this.userHasPermission(user, 'manage_tasks')
+    ) {
+      const msg = 'لا تملك صلاحية جدولة موعد مع المستأجر';
+      this.recordDeniedAccess(user, 'رفض جدولة موعد مستأجر', 'Tenant', tenantId, msg, { propertyId: input.propertyId, deviceName });
+      throw new PermissionDeniedError(msg);
+    }
+    const tenant = this.assertTenantAccess(user, tenantId, 'جدولة موعد مع مستأجر', deviceName);
+    if (input.propertyId) {
+      this.assertPropertyAccess(user, input.propertyId, 'جدولة موعد بعقار', 'Communication', tenantId, deviceName);
+    }
 
     const log: CommunicationLog = {
       id: uid('com'),
@@ -5000,9 +5391,10 @@ export class AqarStore {
     >,
     deviceName?: string
   ): LeaseContract {
-    const user = this.assertPermission(userId, 'manage_contracts');
+    const user = this.assertPermission(userId, 'manage_contracts', { entityType: 'LeaseContract', entityId: contractId, deviceName });
     const contract = this.state.contracts.find((c) => c.id === contractId);
     if (!contract) throw new Error('العقد غير موجود');
+    this.assertPropertyAccess(user, contract.propertyId, 'تعديل بنود العقد', 'LeaseContract', contract.id, deviceName);
 
     const prevSummary = `${contract.ejarNumber || '-'} / ${contract.occupancyStatus || 'نشط'}`;
     Object.assign(contract, patch);
@@ -5039,8 +5431,18 @@ export class AqarStore {
       const user = this.getActingUser(userId);
       const expense = this.state.expenses.find((e) => e.id === expenseId);
       if (!expense) throw new Error('المصروف غير موجود');
+      this.assertPropertyAccess(user, expense.propertyId, 'تعديل/سداد/إلغاء مصروف', 'Expense', expense.id, deviceName);
 
       if (input.action === 'pay') {
+        if (
+          !this.userHasPermission(user, 'collect_payments') &&
+          !this.userHasPermission(user, 'manage_accounting') &&
+          !this.userHasPermission(user, 'create_expense')
+        ) {
+          const msg = 'لا تملك صلاحية سداد المصروف';
+          this.recordDeniedAccess(user, 'رفض سداد مصروف', 'Expense', expense.id, msg, { propertyId: expense.propertyId, deviceName });
+          throw new PermissionDeniedError(msg);
+        }
         if (expense.approvalStatus !== 'معتمد') {
           throw new Error('لا يمكن تسجيل سداد لمصروف قبل اعتماده');
         }
@@ -5177,7 +5579,8 @@ export class AqarStore {
     input: Omit<SupplierInvoice, 'id' | 'invoiceCode' | 'createdBy' | 'createdAt'>,
     deviceName?: string
   ): SupplierInvoice {
-    const user = this.assertPermission(userId, 'create_expense');
+    const user = this.assertPermission(userId, 'create_expense', { entityType: 'SupplierInvoice', propertyId: input.propertyId, deviceName });
+    this.assertPropertyAccess(user, input.propertyId, 'تسجيل فاتورة مورد', 'SupplierInvoice', input.propertyId || 'unscoped', deviceName);
     if (!this.state.supplierInvoices) this.state.supplierInvoices = [];
     const invoiceCode = `SINV-2026-${pad3(this.state.supplierInvoices.length + 1)}`;
     const inv: SupplierInvoice = {
@@ -5210,17 +5613,20 @@ export class AqarStore {
     if (!this.state.supplierInvoices) this.state.supplierInvoices = [];
     const inv = this.state.supplierInvoices.find((i) => i.id === invoiceId);
     if (!inv) throw new Error('فاتورة المورد غير موجودة');
+    this.assertPropertyAccess(user, inv.propertyId, 'تحديث فاتورة مورد', 'SupplierInvoice', inv.id, deviceName);
 
     const oldStatus = inv.status;
     if (patch.payAmount && patch.payAmount > 0) {
-      this.assertPermission(userId, 'manage_accounting');
+      this.assertPermission(userId, 'manage_accounting', { entityType: 'SupplierInvoice', entityId: inv.id, propertyId: inv.propertyId, deviceName });
       inv.paidAmount = Math.min(inv.totalAmount, Math.round((inv.paidAmount + patch.payAmount) * 100) / 100);
       inv.remainingAmount = Math.max(0, Math.round((inv.totalAmount - inv.paidAmount) * 100) / 100);
       inv.status = inv.remainingAmount === 0 ? 'مدفوعة بالكامل' : 'مدفوعة جزئياً';
     } else if (patch.status) {
       if (patch.status === 'معتمدة') {
-        this.assertPermission(userId, 'approve_expense_supervisor');
+        this.assertPermission(userId, 'approve_expense_supervisor', { entityType: 'SupplierInvoice', entityId: inv.id, propertyId: inv.propertyId, deviceName });
         inv.approvedBy = user.id;
+      } else {
+        this.assertPermission(userId, 'create_expense', { entityType: 'SupplierInvoice', entityId: inv.id, propertyId: inv.propertyId, deviceName });
       }
       if (patch.status === 'ملغاة') {
         if (!patch.cancellationReason?.trim()) throw new Error('يجب إدخال سبب إلغاء الفاتورة');
@@ -5246,7 +5652,8 @@ export class AqarStore {
     input: Omit<RecurringExpenseRule, 'id' | 'createdBy' | 'createdAt'>,
     deviceName?: string
   ): RecurringExpenseRule {
-    const user = this.assertPermission(userId, 'create_expense');
+    const user = this.assertPermission(userId, 'create_expense', { entityType: 'RecurringExpenseRule', propertyId: input.propertyId, deviceName });
+    this.assertPropertyAccess(user, input.propertyId, 'جدولة مصروف متكرر', 'RecurringExpenseRule', input.propertyId || 'unscoped', deviceName);
     if (!this.state.recurringExpenses) this.state.recurringExpenses = [];
     const rule: RecurringExpenseRule = {
       ...input,
@@ -5264,9 +5671,10 @@ export class AqarStore {
   }
 
   public toggleRecurringExpense(userId: string, ruleId: string, enabled: boolean, deviceName?: string): RecurringExpenseRule {
-    const user = this.assertPermission(userId, 'create_expense');
+    const user = this.assertPermission(userId, 'create_expense', { entityType: 'RecurringExpenseRule', entityId: ruleId, deviceName });
     const rule = (this.state.recurringExpenses || []).find((r) => r.id === ruleId);
     if (!rule) throw new Error('قاعدة المصروف المتكرر غير موجودة');
+    this.assertPropertyAccess(user, rule.propertyId, 'تحديث مصروف متكرر', 'RecurringExpenseRule', rule.id, deviceName);
     rule.enabled = enabled;
     this.addAudit(user, 'تحديث حالة مصروف متكرر', 'RecurringExpenseRule', rule.id, `${enabled ? 'تفعيل' : 'إيقاف'}: ${rule.title}`, {
       propertyId: rule.propertyId,
@@ -5277,12 +5685,14 @@ export class AqarStore {
   }
 
   public generateDueRecurringExpenses(userId: string, targetMonth?: string, deviceName?: string): Expense[] {
-    const user = this.assertPermission(userId, 'create_expense');
+    const user = this.assertPermission(userId, 'create_expense', { entityType: 'RecurringExpenseRule', deviceName });
     const month = targetMonth || new Date().toISOString().slice(0, 7);
     const created: Expense[] = [];
 
     for (const rule of this.state.recurringExpenses || []) {
       if (!rule.enabled || rule.lastGeneratedMonth === month) continue;
+      if (rule.propertyId && !canUserAccessProperty(this.state, user, rule.propertyId)) continue;
+      if (!rule.propertyId && !userHasAllPropertiesAccess(this.state, user)) continue;
       const dayStr = String(Math.min(28, Math.max(1, rule.dayOfMonth))).padStart(2, '0');
       const vat = Math.round((rule.estimatedAmount - rule.estimatedAmount / 1.15) * 100) / 100;
       this.state.counters.expense += 1;
@@ -5337,7 +5747,8 @@ export class AqarStore {
     input: { propertyId: string; month: string; monthlyLimitSar: number; alertThresholdPercent?: number; blockAt100Percent?: boolean },
     deviceName?: string
   ): PropertyBudget {
-    const user = this.assertPermission(userId, 'manage_accounting');
+    const user = this.assertPermission(userId, 'manage_accounting', { entityType: 'PropertyBudget', propertyId: input.propertyId, deviceName });
+    this.assertPropertyAccess(user, input.propertyId, 'تحديد ميزانية عقار', 'PropertyBudget', input.propertyId, deviceName);
     if (!this.state.propertyBudgets) this.state.propertyBudgets = [];
     let existing = this.state.propertyBudgets.find((b) => b.propertyId === input.propertyId && b.month === input.month);
     const now = new Date().toISOString();
@@ -5379,9 +5790,13 @@ export class AqarStore {
     patch: Partial<Lead> & { newInteraction?: Omit<LeadInteraction, 'id' | 'actorName' | 'createdAt'> },
     deviceName?: string
   ): Lead {
-    const user = this.assertPermission(userId, 'manage_contracts');
+    const user = this.assertPermission(userId, 'manage_contracts', { entityType: 'Lead', entityId: leadId, deviceName });
     const lead = this.state.leads.find((l) => l.id === leadId);
     if (!lead) throw new Error('ملف المهتم غير موجود');
+    this.assertLeadAccess(user, lead, 'تحديث ملف مهتم', deviceName);
+    if (patch.propertyId && patch.propertyId !== lead.propertyId) {
+      this.assertPropertyAccess(user, patch.propertyId, 'نقل مهتم لعقار آخر', 'Lead', lead.id, deviceName);
+    }
 
     const { newInteraction, ...rest } = patch;
     Object.assign(lead, rest);
@@ -5553,13 +5968,15 @@ export class AqarStore {
     },
     deviceName?: string
   ): LeadEscalation {
-    const user = this.assertPermission(userId, 'manage_contracts');
+    const user = this.assertPermission(userId, 'manage_contracts', { entityType: 'Lead', entityId: leadId, deviceName });
     const lead = this.state.leads.find((l) => l.id === leadId);
     if (!lead) throw new Error('ملف المهتم غير موجود');
+    this.assertLeadAccess(user, lead, 'تصعيد ملف مهتم', deviceName);
 
     const unit = this.state.units.find((u) => u.id === (input.unitId || lead.unitId)) || this.state.units[0];
     const prop = this.state.properties.find((p) => p.id === (unit?.propertyId || lead.propertyId)) || this.state.properties[0];
     if (!prop || !unit) throw new Error('يرجى تحديد العقار والوحدة قبل الإرسال');
+    this.assertPropertyAccess(user, prop.id, 'تصعيد ملف مهتم', 'LeadEscalation', lead.id, deviceName);
 
     if (input.rentAmount !== undefined) lead.offeredRent = input.rentAmount;
     if (input.paymentFrequency) lead.paymentFrequency = input.paymentFrequency;
@@ -5715,9 +6132,22 @@ export class AqarStore {
       throw new Error(input.decision === 'مرفوض' ? 'يرجى كتابة سبب الرفض' : 'يرجى توضيح التعديلات المطلوبة');
     }
 
-    const actingUser = actorUserId ? this.state.users.find((u) => u.id === actorUserId && u.active) : undefined;
+    const actingUser = actorUserId ? this.getActingUser(actorUserId) : undefined;
     if (!input.isToken && !actingUser) {
       throw new Error('يجب تسجيل الدخول للبت في الطلب');
+    }
+    if (!input.isToken && actingUser) {
+      if (!this.userHasPermission(actingUser, 'approve_expense_supervisor') && !this.userHasPermission(actingUser, 'manage_contracts')) {
+        const msg = 'لا تملك صلاحية البت في طلبات تصعيد المهتمين';
+        this.recordDeniedAccess(actingUser, 'رفض البت في تصعيد مهتم', 'LeadEscalation', esc.id, msg, {
+          propertyId: esc.propertyId,
+          deviceName,
+        });
+        throw new PermissionDeniedError(msg);
+      }
+      if (esc.propertyId) {
+        this.assertPropertyAccess(actingUser, esc.propertyId, 'البت في طلب مهتم', 'LeadEscalation', esc.id, deviceName);
+      }
     }
 
     const deciderName = input.isToken ? esc.recipientName : actingUser!.nameAr;
@@ -5787,9 +6217,10 @@ export class AqarStore {
 
   public convertLeadToTenant(userId: string, leadId: string, deviceName?: string): { lead: Lead; tenant: Tenant } {
     return this.runTransaction(() => {
-      const user = this.assertPermission(userId, 'manage_tenants');
+      const user = this.assertPermission(userId, 'manage_tenants', { entityType: 'Lead', entityId: leadId, deviceName });
       const lead = this.state.leads.find((l) => l.id === leadId);
       if (!lead) throw new Error('ملف المهتم غير موجود');
+      this.assertLeadAccess(user, lead, 'تحويل مهتم إلى مستأجر', deviceName);
       if (lead.convertedToTenantId) {
         const existing = this.state.tenants.find((t) => t.id === lead.convertedToTenantId);
         if (existing) return { lead, tenant: existing };
@@ -5876,9 +6307,10 @@ export class AqarStore {
     },
     deviceName?: string
   ) {
-    const user = this.assertPermission(userId, 'manage_properties');
+    const user = this.assertPermission(userId, 'manage_properties', { entityType: 'MeterReading', propertyId: input.propertyId, deviceName });
     const prop = this.state.properties.find((p) => p.id === input.propertyId);
     if (!prop) throw new Error('العقار غير موجود');
+    this.assertPropertyAccess(user, prop.id, 'تسجيل قراءة عداد', 'MeterReading', prop.id, deviceName);
     if (!input.meterNumber?.trim()) throw new Error('يرجى إدخال رقم العداد');
     const prevVal = Number(input.previousReading || 0);
     const currVal = Number(input.currentReading || 0);
@@ -6053,7 +6485,7 @@ export class AqarStore {
     },
     deviceName?: string
   ): ScheduledReportConfig {
-    const user = this.assertPermission(userId, 'view_audit');
+    const user = this.assertModuleAction(userId, 'reports', 'export', { entityType: 'ScheduledReport', deviceName });
     if (!input.title?.trim()) throw new Error('يرجى إدخال عنوان التقرير المجدول');
     if (!this.state.scheduledReports) this.state.scheduledReports = [];
     const schedule: ScheduledReportConfig = {
@@ -6083,7 +6515,7 @@ export class AqarStore {
   }
 
   public deleteScheduledReport(userId: string, scheduleId: string, deviceName?: string) {
-    const user = this.assertPermission(userId, 'view_audit');
+    const user = this.assertModuleAction(userId, 'reports', 'manage', { entityType: 'ScheduledReport', entityId: scheduleId, deviceName });
     const list = this.state.scheduledReports || [];
     const target = list.find((s) => s.id === scheduleId);
     if (!target) throw new Error('التقرير المجدول غير موجود');
@@ -6101,7 +6533,7 @@ export class AqarStore {
   }
 
   public runScheduledReportNow(userId: string, scheduleId: string, deviceName?: string): ScheduledReportConfig {
-    const user = this.assertPermission(userId, 'view_audit');
+    const user = this.assertModuleAction(userId, 'reports', 'view', { entityType: 'ScheduledReport', entityId: scheduleId, deviceName });
     const target = (this.state.scheduledReports || []).find((s) => s.id === scheduleId);
     if (!target) throw new Error('التقرير المجدول غير موجود');
     target.lastRunAt = new Date().toISOString();
@@ -6165,7 +6597,8 @@ export class AqarStore {
     },
     deviceName?: string
   ): ZatcaInvoiceRecord {
-    const user = this.assertPermission(userId, 'manage_accounting');
+    const user = this.assertPermission(userId, 'manage_accounting', { entityType: 'ZatcaInvoice', propertyId: input.propertyId, deviceName });
+    this.assertPropertyAccess(user, input.propertyId, 'إصدار فاتورة إلكترونية', 'ZatcaInvoice', input.propertyId || 'unscoped', deviceName);
     const subtotal = Number(input.subtotal || 0);
     if (subtotal <= 0) throw new Error('يجب أن يكون صافي مبلغ الفاتورة أكبر من صفر');
     if (!input.buyerName?.trim()) throw new Error('يرجى إدخال اسم العميل / المشتري');
@@ -6270,8 +6703,15 @@ export class AqarStore {
   }
 
   public deleteFavoriteReport(userId: string, presetId: string): { deletedId: string } {
-    this.getActingUser(userId);
-    this.state.favoriteReports = (this.state.favoriteReports || []).filter((r) => r.id !== presetId);
+    const user = this.getActingUser(userId);
+    const list = this.state.favoriteReports || [];
+    const target = list.find((r) => r.id === presetId);
+    if (target && target.createdBy !== user.id && user.role !== 'sys_owner' && user.role !== 'gm') {
+      const msg = 'لا تملك صلاحية حذف تقرير مفضل لمستخدم آخر';
+      this.recordDeniedAccess(user, 'رفض حذف تقرير مفضل', 'FavoriteReport', presetId, msg);
+      throw new PermissionDeniedError(msg);
+    }
+    this.state.favoriteReports = list.filter((r) => r.id !== presetId);
     this.persist();
     return { deletedId: presetId };
   }
@@ -6304,8 +6744,15 @@ export class AqarStore {
   }
 
   public deleteSharedSearchFilter(userId: string, filterId: string): { deletedId: string } {
-    this.getActingUser(userId);
-    this.state.sharedSearchFilters = (this.state.sharedSearchFilters || []).filter((f) => f.id !== filterId);
+    const user = this.getActingUser(userId);
+    const list = this.state.sharedSearchFilters || [];
+    const target = list.find((f) => f.id === filterId);
+    if (target && target.createdBy !== user.id && user.role !== 'sys_owner' && user.role !== 'gm') {
+      const msg = 'لا تملك صلاحية حذف فلتر بحث لمستخدم آخر';
+      this.recordDeniedAccess(user, 'رفض حذف فلتر بحث', 'SharedSearchFilter', filterId, msg);
+      throw new PermissionDeniedError(msg);
+    }
+    this.state.sharedSearchFilters = list.filter((f) => f.id !== filterId);
     this.persist();
     return { deletedId: filterId };
   }
@@ -6615,7 +7062,10 @@ export class AqarStore {
         if (!customExists) throw new Error('الدور المخصص المحدد غير موجود');
       }
 
-      const companyId = this.getWorkspaceCompanyId();
+      const companyId =
+        actor.role === 'sys_owner' && (input as any).companyId
+          ? String((input as any).companyId)
+          : actor.companyId || this.getWorkspaceCompanyId();
       const company = this.getCompanySummary();
       const now = new Date().toISOString();
       const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
@@ -6645,8 +7095,7 @@ export class AqarStore {
         statusState: 'غير متصل',
         specialty: input.jobTitle?.trim() || meta.roleLabelAr,
         avatarDataUrl: input.avatarDataUrl,
-        allowedPropertyIds:
-          input.allowedPropertyIds && input.allowedPropertyIds.length > 0 ? input.allowedPropertyIds : undefined,
+        allowedPropertyIds: Array.isArray(input.allowedPropertyIds) ? [...input.allowedPropertyIds] : [],
         customModulePermissions: input.customModulePermissions,
         managerRating: 5,
         lastActivitySummary: 'تم إنشاء الحساب وإرسال دعوة التفعيل',
@@ -7074,14 +7523,31 @@ export class AqarStore {
         patch.accountStatus !== undefined;
 
       if (actor.id === targetUserId && touchesGovernance) {
-        throw new PermissionDeniedError('لا يمكن لأي مستخدم تعديل دوره أو صلاحياته أو حالة حسابه بنفسه');
+        const msg = 'لا يمكن لأي مستخدم تعديل دوره أو صلاحياته أو حالة حسابه بنفسه';
+        this.recordDeniedAccess(actor, 'رفض تعديل الصلاحيات الذاتية', 'StaffUser', targetUserId, msg, { deviceName });
+        throw new PermissionDeniedError(msg);
+      }
+      if (actor.role === 'gm' && !canUserAccessCompany(this.state, actor, target.companyId)) {
+        const msg = 'لا يملك مدير الشركة صلاحية تعديل موظف يتبع شركة أخرى';
+        this.recordDeniedAccess(actor, 'رفض تعديل موظف عبر الشركات', 'StaffUser', targetUserId, msg, { deviceName });
+        throw new PermissionDeniedError(msg);
       }
       if (actor.role === 'gm' && (target.role === 'sys_owner' || target.role === 'gm')) {
-        throw new PermissionDeniedError('لا يملك مدير الشركة صلاحية تعديل حساب مالك النظام أو مدير شركة آخر');
+        const msg = 'لا يملك مدير الشركة صلاحية تعديل حساب مالك النظام أو مدير شركة آخر';
+        this.recordDeniedAccess(actor, 'رفض تجاوز التسلسل الوظيفي', 'StaffUser', targetUserId, msg, { deviceName });
+        throw new PermissionDeniedError(msg);
       }
       if (actor.role === 'gm' && (patch.role === 'sys_owner' || patch.role === 'gm')) {
-        throw new PermissionDeniedError('ترقية موظف إلى مالك نظام أو مدير عام محصورة بمالك النظام فقط');
+        const msg = 'ترقية موظف إلى مالك نظام أو مدير عام محصورة بمالك النظام فقط';
+        this.recordDeniedAccess(actor, 'رفض ترقية غير مصرح بها', 'StaffUser', targetUserId, msg, { deviceName });
+        throw new PermissionDeniedError(msg);
       }
+
+      const prevTargetSnapshot: StaffUser = {
+        ...target,
+        allowedPropertyIds: Array.isArray(target.allowedPropertyIds) ? [...target.allowedPropertyIds] : undefined,
+      };
+      const prevRoleKey = target.role;
 
       if (patch.email !== undefined) {
         const normEmail = patch.email.trim().toLowerCase();
@@ -7117,8 +7583,7 @@ export class AqarStore {
       if (patch.approvalLimitSar !== undefined) target.approvalLimitSar = Number(patch.approvalLimitSar || 0);
 
       if (patch.allowedPropertyIds !== undefined) {
-        target.allowedPropertyIds =
-          patch.allowedPropertyIds && patch.allowedPropertyIds.length > 0 ? patch.allowedPropertyIds : undefined;
+        target.allowedPropertyIds = Array.isArray(patch.allowedPropertyIds) ? [...patch.allowedPropertyIds] : [];
       }
       if (patch.customModulePermissions !== undefined) {
         target.customModulePermissions = patch.customModulePermissions || undefined;
@@ -7169,7 +7634,7 @@ export class AqarStore {
           if (patch.accountStatus === 'موقوف' || patch.accountStatus === 'مرفوض' || patch.accountStatus === 'منتهي الوصول') {
             target.terminatedAt = new Date().toISOString();
             target.terminationReason = patch.terminationReason?.trim() || undefined;
-            this.sqlite.revokeOtherSessionsForUser(target.id);
+            this.revokeUserSessions(target.id);
             terminateSessions = true;
             // Cancel any open pending invitation when rejected/expired
             if (patch.accountStatus === 'مرفوض' || patch.accountStatus === 'منتهي الوصول') {
@@ -7185,12 +7650,21 @@ export class AqarStore {
         }
       }
 
+      const roleDowngraded = isRoleDowngrade(prevRoleKey, target.role);
+      const scopeShrank = isPropertyScopeShrink(this.state, prevTargetSnapshot, this.state, target);
+      if (roleDowngraded || scopeShrank) {
+        this.revokeUserSessions(target.id);
+        terminateSessions = true;
+      }
+
       this.addAudit(
         actor,
         'تحديث ملف وصلاحيات موظف',
         'StaffUser',
         target.id,
-        `تعديل بيانات الموظف ${target.nameAr} (${target.roleLabelAr})${patch.accountStatus && patch.accountStatus !== prevStatus ? ` · الحالة: ${prevStatus} ← ${patch.accountStatus}` : ''}`,
+        `تعديل بيانات الموظف ${target.nameAr} (${target.roleLabelAr})${
+          patch.accountStatus && patch.accountStatus !== prevStatus ? ` · الحالة: ${prevStatus} ← ${patch.accountStatus}` : ''
+        }${terminateSessions ? ' [إنهاء الجلسات النشطة]' : ''}`,
         { oldValue: prevStatus, newValue: target.accountStatus, reason: patch.terminationReason, deviceName }
       );
       this.persist();
@@ -7637,11 +8111,8 @@ export class AqarStore {
         user.security.hasPin = true;
       }
 
-      let terminateSessions = false;
-      if (input.purpose === 'password_reset') {
-        this.sqlite.revokeOtherSessionsForUser(user.id);
-        terminateSessions = true;
-      }
+      this.revokeUserSessions(user.id);
+      const terminateSessions = true;
 
       this.addAudit(
         user,

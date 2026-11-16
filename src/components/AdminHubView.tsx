@@ -54,7 +54,7 @@ const PERMISSION_LABELS: { key: PermissionKey; labelAr: string }[] = [
 ];
 
 export function AdminHubView({ mode = 'all' }: { mode?: 'reports' | 'team' | 'all' }) {
-  const { state, lang, hasPermission, mutate, pushToast } = useAqar();
+  const { state, lang, hasPermission, hasModulePermission, mutate, pushToast } = useAqar();
   const [tab, setTab] = useState<'reports' | 'documents' | 'rbac' | 'backups'>(
     mode === 'team' ? 'rbac' : 'reports'
   );
@@ -227,7 +227,7 @@ export function AdminHubView({ mode = 'all' }: { mode?: 'reports' | 'team' | 'al
               {lang === 'ar' ? 'فريق العمل والصلاحيات وسجل التدقيق' : 'Team, RBAC & Audit Log'}
             </button>
           )}
-          {(mode === 'all' || mode === 'reports') && (
+          {(mode === 'all' || mode === 'reports') && (hasModulePermission('backups', 'view') || hasPermission('backup_restore')) && (
             <button
               onClick={() => setTab('backups')}
               className={`px-4 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
@@ -391,12 +391,14 @@ export function AdminHubView({ mode = 'all' }: { mode?: 'reports' | 'team' | 'al
                   <h3 className="text-sm font-bold">النسخ الاحتياطي والاستعادة</h3>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleDownloadJsonSnapshot}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-xs cursor-pointer"
-                  >
-                    تنزيل JSON
-                  </button>
+                  {(hasModulePermission('backups', 'export') || hasPermission('backup_restore')) && (
+                    <button
+                      onClick={handleDownloadJsonSnapshot}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 text-xs cursor-pointer"
+                    >
+                      تنزيل JSON
+                    </button>
+                  )}
                   {hasPermission('backup_restore') && (
                     <button
                       onClick={handleCreateBackup}

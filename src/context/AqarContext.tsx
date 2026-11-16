@@ -401,9 +401,7 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
   activeUserIdRef.current = activeUserId;
   const authTokenRef = useRef(authToken);
   authTokenRef.current = authToken;
-  const refreshTokenRef = useRef<string | null>(
-    typeof window !== 'undefined' ? window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY) : null
-  );
+  const refreshTokenRef = useRef<string | null>(null);
   const singleFlightRefreshRef = useRef<Promise<boolean> | null>(null);
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
@@ -536,24 +534,24 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
                 rememberMe: true,
               } satisfies TrustedOfflineMeta)
             );
-            if (sessionExtras?.refreshToken) {
+            window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+            if (sessionExtras?.refreshToken && appTypeRef.current === 'desktop' && window.aqarDesktop?.protectSecret) {
               const rToken = sessionExtras.refreshToken;
               refreshTokenRef.current = rToken;
-              if (window.aqarDesktop?.protectSecret) {
-                void window.aqarDesktop.protectSecret(rToken).then((res) => {
-                  if (res?.protected && res.cipher) {
-                    window.localStorage.setItem(DESKTOP_ENCRYPTED_REFRESH_KEY, res.cipher);
-                    window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
-                    setDesktopProtectedStorage(true);
-                  } else {
-                    window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, rToken);
-                    window.localStorage.removeItem(DESKTOP_ENCRYPTED_REFRESH_KEY);
-                    setDesktopProtectedStorage(false);
-                  }
-                });
-              } else {
-                window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, rToken);
-              }
+              void window.aqarDesktop.protectSecret(rToken).then((res) => {
+                if (res?.protected && res.cipher) {
+                  window.localStorage.setItem(DESKTOP_ENCRYPTED_REFRESH_KEY, res.cipher);
+                  window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+                  setDesktopProtectedStorage(true);
+                } else {
+                  window.localStorage.removeItem(DESKTOP_ENCRYPTED_REFRESH_KEY);
+                  window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+                  setDesktopProtectedStorage(false);
+                }
+              });
+            } else if (!sessionExtras?.refreshToken && appTypeRef.current === 'web') {
+              refreshTokenRef.current = null;
+              window.localStorage.removeItem(DESKTOP_ENCRYPTED_REFRESH_KEY);
             }
           } else {
             window.sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
@@ -744,13 +742,14 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadStoredRefreshToken = useCallback(async (): Promise<string | null> => {
-    if (refreshTokenRef.current) return refreshTokenRef.current;
     if (typeof window === 'undefined') return null;
-    const plain = window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
-    if (plain) {
-      refreshTokenRef.current = plain;
-      return plain;
+    // Always purge any legacy plaintext refresh token from browser storage
+    window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+    if (appTypeRef.current !== 'desktop') {
+      refreshTokenRef.current = null;
+      return null;
     }
+    if (refreshTokenRef.current) return refreshTokenRef.current;
     const cipher = window.localStorage.getItem(DESKTOP_ENCRYPTED_REFRESH_KEY);
     if (cipher && window.aqarDesktop?.unprotectSecret) {
       const decrypted = await window.aqarDesktop.unprotectSecret(cipher);
@@ -900,11 +899,13 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       const activeWs = workspaceIdRef.current;
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+      }
       const hadPriorSessionHint =
         typeof window !== 'undefined' &&
         Boolean(
           authTokenRef.current ||
-            window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY) ||
             window.localStorage.getItem(DESKTOP_ENCRYPTED_REFRESH_KEY) ||
             window.localStorage.getItem(TRUSTED_OFFLINE_META_KEY)
         );
@@ -1844,7 +1845,13 @@ export function AqarProvider({ children }: { children: React.ReactNode }) {
         }
         const data = await res.json();
         if (!res.ok) {
-          pushToast('error', data.error || 'تعذر تنفيذ العملية');
+          const fallbackErr =
+            res.status === 403 || data?.code === 'FORBIDDEN'
+              ? lang === 'ar'
+                ? 'ليس لديك صلاحية لتنفيذ هذا الإجراء'
+                : 'You do not have permission to perform this action'
+              : 'تعذر تنفيذ العملية';
+          pushToast('error', data?.error || fallbackErr);
           return null;
         }
         if (data.state) cacheStateSnapshot(data.state);

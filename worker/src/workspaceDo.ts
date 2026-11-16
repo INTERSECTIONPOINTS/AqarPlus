@@ -2,17 +2,40 @@ import { DurableObject } from 'cloudflare:workers';
 import { createInitialSeed, DEFAULT_ROLE_PERMISSIONS } from '../../server/seed';
 import {
   AqarDatabaseState,
+  AuditLog,
   BackupCollectionDiff,
   BackupPreviewResult,
   BackupSnapshot,
+  CustomRoleDefinition,
   Lead,
   Payment,
   PaymentAllocation,
   PermissionKey,
+  PermissionLevel,
+  PermissionModuleKey,
   RoleKey,
   StaffUser,
   SyncConflictRecord,
 } from '../../src/types/aqar';
+import {
+  ALL_PROPERTIES_SCOPE,
+  buildAllDefaultRoleModulePermissions,
+  canUserAccessCompany,
+  canUserAccessProperty,
+  deriveLegacyPermissionsFromModules,
+  filterStateForUser,
+  getAccessiblePropertyIdsSet,
+  getAllowedNavsForUser,
+  getRecommendedLandingNav,
+  isPropertyScopeShrink,
+  isRoleDowngrade,
+  isUserAccountActive,
+  ROLE_TEMPLATES,
+  sanitizeUserForClient,
+  userHasAllPropertiesAccess,
+  userHasLegacyPermission,
+  userHasModuleAction,
+} from '../../src/utils/rbac';
 import {
   decryptBackupWeb,
   encryptBackupWeb,
@@ -28,21 +51,40 @@ export interface WorkerEnv {
   WORKSPACE_DO: DurableObjectNamespace<AqarWorkspaceDO>;
   AQAR_SESSION_SECRET?: string;
   AQAR_DEMO_LOGIN?: string;
+  AQAR_ALLOW_SEED_DEFAULTS?: string;
+  AQAR_BOOTSTRAP_ADMIN_PASSWORD?: string;
+  AQAR_BOOTSTRAP_ADMIN_EMAIL?: string;
+  AQAR_BOOTSTRAP_ADMIN_PIN?: string;
   GEMINI_API_KEY?: string;
 }
 
+export class WorkerPermissionDeniedError extends Error {
+  public readonly statusCode = 403;
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkerPermissionDeniedError';
+  }
+}
+
 const SESSION_COOKIE_NAME = 'aqar_session';
+const REFRESH_COOKIE_NAME = 'aqar_refresh';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const ACCESS_TOKEN_TTL_MS = 1000 * 60 * 60 * 4;
+const SESSION_SHORT_TTL_MS = 1000 * 60 * 60 * 8;
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 5 * 60 * 1000;
 
 const ARRAY_COLLECTIONS: (keyof AqarDatabaseState)[] = [
   'companies',
   'users',
+  'customRoles',
+  'employeeInvitations',
   'properties',
   'units',
   'meterReadings',
   'owners',
+  'ownerShares',
+  'ownerTransfers',
   'vendors',
   'tenants',
   'leads',
@@ -82,6 +124,7 @@ const ARRAY_COLLECTIONS: (keyof AqarDatabaseState)[] = [
 const SINGLETON_KEYS: (keyof AqarDatabaseState)[] = [
   'settings',
   'rolePermissions',
+  'roleModulePermissions',
   'counters',
   'processedIdempotencyKeys',
   'archiveLastNightlyRun',
@@ -113,11 +156,12 @@ interface AuthedActor {
 
 const PUBLIC_PATHS = new Set([
   '/api/health',
+  '/api/workspaces/provision',
   '/api/auth/session',
   '/api/auth/login',
   '/api/auth/login-pin',
+  '/api/auth/refresh',
   '/api/auth/logout',
-  '/api/workspaces/provision',
   '/api/public/prospect-context',
   '/api/public/leads',
 ]);
@@ -126,14 +170,36 @@ function uid(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function jsonResponse(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      ...(extraHeaders || {}),
-    },
-  });
+async function sha256HexWeb(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function randomHexWeb(byteLength = 32): string {
+  const buf = crypto.getRandomValues(new Uint8Array(byteLength));
+  return Array.from(buf)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function jsonResponse(body: unknown, status = 200, extraHeaders?: HeadersInit): Response {
+  const headers = new Headers(extraHeaders);
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'SAMEORIGIN');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+function errorResponse(err: unknown, defaultStatus = 400): Response {
+  if (err instanceof WorkerPermissionDeniedError) {
+    return jsonResponse({ error: err.message, code: 'FORBIDDEN' }, 403);
+  }
+  const msg = (err as Error)?.message || 'تعذر تنفيذ الطلب';
+  return jsonResponse({ error: msg }, defaultStatus);
 }
 
 function parseCookies(header: string | null): Record<string, string> {
@@ -153,8 +219,18 @@ function parseCookies(header: string | null): Record<string, string> {
   return out;
 }
 
+function isSecureRequest(req: Request): boolean {
+  try {
+    const fwd = req.headers.get('x-forwarded-proto');
+    if (fwd && fwd.split(',')[0].trim().toLowerCase() === 'https') return true;
+    return new URL(req.url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function normalizePhone(raw: string): string {
-  return raw.replace(/[^\d]/g, '').slice(-9);
+  return (raw || '').replace(/[^\d]/g, '').slice(-9);
 }
 
 function resolveRequestWorkspace(request: Request): string {
@@ -207,7 +283,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       CREATE TABLE IF NOT EXISTS user_credentials (
         user_id TEXT PRIMARY KEY,
         password_hash TEXT NOT NULL,
-        pin_hash TEXT NOT NULL,
+        pin_hash TEXT,
         failed_attempts INTEGER NOT NULL DEFAULT 0,
         locked_until TEXT,
         updated_at TEXT NOT NULL
@@ -218,6 +294,10 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         user_id TEXT NOT NULL,
         workspace_id TEXT NOT NULL DEFAULT 'default',
         device_name TEXT NOT NULL,
+        app_type TEXT NOT NULL DEFAULT 'web',
+        remember_me INTEGER NOT NULL DEFAULT 1,
+        refresh_token_hash TEXT,
+        refresh_expires_at TEXT,
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         revoked INTEGER NOT NULL DEFAULT 0
@@ -242,25 +322,53 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       );
     `);
 
-    // Safe forward schema migration for existing DO SQLite databases
-    try {
-      sql.exec('ALTER TABLE user_credentials ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0');
-    } catch {
-      // column already exists
-    }
-    try {
-      sql.exec('ALTER TABLE user_credentials ADD COLUMN locked_until TEXT');
-    } catch {
-      // column already exists
-    }
-    try {
-      sql.exec("ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'");
-    } catch {
-      // column already exists
+    const alterCols = [
+      'ALTER TABLE user_credentials ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE user_credentials ADD COLUMN locked_until TEXT',
+      "ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+      "ALTER TABLE sessions ADD COLUMN app_type TEXT NOT NULL DEFAULT 'web'",
+      'ALTER TABLE sessions ADD COLUMN remember_me INTEGER NOT NULL DEFAULT 1',
+      'ALTER TABLE sessions ADD COLUMN refresh_token_hash TEXT',
+      'ALTER TABLE sessions ADD COLUMN refresh_expires_at TEXT',
+    ];
+    for (const stmt of alterCols) {
+      try {
+        sql.exec(stmt);
+      } catch {
+        // column already exists
+      }
     }
   }
 
-  private loadNormalizedState(): AqarDatabaseState | null {
+  private normalizeLoadedState(rawState: AqarDatabaseState, workspaceId: string): AqarDatabaseState {
+    const base = createInitialSeed();
+    const defCompanyId = (rawState.companies || base.companies || [])[0]?.id || `comp-${workspaceId}`;
+    const mergedRolePermissions: Record<RoleKey, PermissionKey[]> = {
+      ...DEFAULT_ROLE_PERMISSIONS,
+      ...(rawState.rolePermissions || {}),
+    };
+    const mergedRoleModulePermissions = {
+      ...buildAllDefaultRoleModulePermissions(),
+      ...(rawState.roleModulePermissions || {}),
+    };
+    const users: StaffUser[] = (rawState.users || []).map((u) => ({
+      ...u,
+      companyId: u.role === 'sys_owner' ? u.companyId : u.companyId || defCompanyId,
+      accountStatus: u.accountStatus || (u.active ? 'نشط' : 'موقوف'),
+    }));
+    return {
+      ...base,
+      ...rawState,
+      users,
+      customRoles: Array.isArray(rawState.customRoles) ? rawState.customRoles : [],
+      employeeInvitations: Array.isArray(rawState.employeeInvitations) ? rawState.employeeInvitations : [],
+      rolePermissions: mergedRolePermissions,
+      roleModulePermissions: mergedRoleModulePermissions,
+      entityRevisions: rawState.entityRevisions || {},
+    };
+  }
+
+  private loadNormalizedState(workspaceId: string): AqarDatabaseState | null {
     const sql = this.ctx.storage.sql;
     const settingsRow = sql
       .exec<{ value: string }>("SELECT value FROM kv_meta WHERE key = 'singleton:settings'")
@@ -286,12 +394,14 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       const rows = sql
         .exec<{ data: string }>('SELECT data FROM entities WHERE collection = ? ORDER BY sort_order ASC', String(col))
         .toArray();
-      out[String(col)] = rows.map((r) => JSON.parse(r.data));
+      if (rows.length > 0 || col === 'customRoles' || col === 'employeeInvitations') {
+        out[String(col)] = rows.map((r) => JSON.parse(r.data));
+      } else {
+        out[String(col)] = rows.map((r) => JSON.parse(r.data));
+      }
     }
 
-    const result = out as unknown as AqarDatabaseState;
-    if (!result.entityRevisions) result.entityRevisions = {};
-    return result;
+    return this.normalizeLoadedState(out as unknown as AqarDatabaseState, workspaceId);
   }
 
   private saveNormalizedState(state: AqarDatabaseState, workspaceId: string) {
@@ -335,44 +445,68 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     if (this.initialized && this.stateCache) return this.stateCache;
 
     const sql = this.ctx.storage.sql;
-    const normalized = this.loadNormalizedState();
+    const normalized = this.loadNormalizedState(workspaceId);
     if (normalized) {
       this.stateCache = normalized;
     } else {
       const legacyRows = sql.exec<{ state_json: string }>('SELECT state_json FROM state_snapshots WHERE id = 1').toArray();
       if (legacyRows.length > 0) {
-        const parsed = JSON.parse(legacyRows[0].state_json) as AqarDatabaseState;
-        if (!parsed.entityRevisions) parsed.entityRevisions = {};
+        const parsed = this.normalizeLoadedState(JSON.parse(legacyRows[0].state_json) as AqarDatabaseState, workspaceId);
         this.stateCache = parsed;
         this.saveNormalizedState(parsed, workspaceId);
       } else if (workspaceId === 'default') {
-        const seed = createInitialSeed();
-        if (!seed.entityRevisions) seed.entityRevisions = {};
+        const seed = this.normalizeLoadedState(createInitialSeed(), workspaceId);
         this.stateCache = seed;
         this.saveNormalizedState(seed, workspaceId);
       } else {
-        // Non-default custom workspaces start isolated & empty until provisioned
         const emptySeed = this.createEmptyWorkspaceSeed(workspaceId);
         this.stateCache = emptySeed;
         this.saveNormalizedState(emptySeed, workspaceId);
       }
     }
 
-    // Seed credentials only for existing users without credentials
-    const existingCreds = new Set(
-      sql.exec<{ user_id: string }>('SELECT user_id FROM user_credentials').toArray().map((r) => r.user_id)
-    );
-    const defaultPwHash = await hashSecretWeb('Aqar@2026');
-    const defaultPinHash = await hashSecretWeb('1234');
-    const now = new Date().toISOString();
-    for (const user of this.stateCache.users) {
-      if (!existingCreds.has(user.id)) {
+    // Strict credential seeding policy:
+    // Only seed default demo credentials ('Aqar@2026' / '1234') when explicitly enabled via env flags.
+    const allowSeedDefaults =
+      this.env.AQAR_ALLOW_SEED_DEFAULTS === 'true' || this.env.AQAR_DEMO_LOGIN === 'true';
+    const bootstrapPassword = (this.env.AQAR_BOOTSTRAP_ADMIN_PASSWORD || '').trim();
+    const bootstrapEmail = (this.env.AQAR_BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
+    const bootstrapPin = (this.env.AQAR_BOOTSTRAP_ADMIN_PIN || '').trim();
+
+    if (allowSeedDefaults) {
+      const existingCreds = new Set(
+        sql.exec<{ user_id: string }>('SELECT user_id FROM user_credentials').toArray().map((r) => r.user_id)
+      );
+      const defaultPwHash = await hashSecretWeb('Aqar@2026');
+      const defaultPinHash = await hashSecretWeb('1234');
+      const now = new Date().toISOString();
+      for (const user of this.stateCache.users) {
+        if (!existingCreds.has(user.id)) {
+          sql.exec(
+            'INSERT INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)',
+            user.id,
+            defaultPwHash,
+            defaultPinHash,
+            now
+          );
+        }
+      }
+    } else if (bootstrapPassword.length >= 8) {
+      const existingCreds = new Set(
+        sql.exec<{ user_id: string }>('SELECT user_id FROM user_credentials').toArray().map((r) => r.user_id)
+      );
+      const targetAdmin =
+        this.stateCache.users.find((u) => bootstrapEmail && u.email.toLowerCase() === bootstrapEmail) ||
+        this.stateCache.users.find((u) => u.role === 'sys_owner');
+      if (targetAdmin && !existingCreds.has(targetAdmin.id)) {
+        const pwHash = await hashSecretWeb(bootstrapPassword);
+        const pinHash = /^\d{4,6}$/.test(bootstrapPin) ? await hashSecretWeb(bootstrapPin) : null;
         sql.exec(
           'INSERT INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)',
-          user.id,
-          defaultPwHash,
-          defaultPinHash,
-          now
+          targetAdmin.id,
+          pwHash,
+          pinHash,
+          new Date().toISOString()
         );
       }
     }
@@ -385,10 +519,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       if (secretRow.length > 0) {
         this.sessionSecretCache = secretRow[0].value;
       } else {
-        const bytes = crypto.getRandomValues(new Uint8Array(32));
-        const hex = Array.from(bytes)
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('');
+        const hex = randomHexWeb(32);
         sql.exec("INSERT INTO kv_meta (key, value) VALUES ('session_secret', ?)", hex);
         this.sessionSecretCache = hex;
       }
@@ -398,7 +529,11 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     return this.stateCache;
   }
 
-  private createEmptyWorkspaceSeed(workspaceId: string, companyNameAr = 'منشأة عقارية جديدة', companyNameEn = 'New Real Estate Workspace'): AqarDatabaseState {
+  private createEmptyWorkspaceSeed(
+    workspaceId: string,
+    companyNameAr = 'منشأة عقارية جديدة',
+    companyNameEn = 'New Real Estate Workspace'
+  ): AqarDatabaseState {
     const base = createInitialSeed();
     const now = new Date().toISOString();
     return {
@@ -426,10 +561,14 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         },
       ],
       users: [],
+      customRoles: [],
+      employeeInvitations: [],
       properties: [],
       units: [],
       meterReadings: [],
       owners: [],
+      ownerShares: [],
+      ownerTransfers: [],
       vendors: [],
       tenants: [],
       leads: [],
@@ -458,6 +597,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       syncConflicts: [],
       zatcaInvoices: [],
       rolePermissions: JSON.parse(JSON.stringify(DEFAULT_ROLE_PERMISSIONS)),
+      roleModulePermissions: buildAllDefaultRoleModulePermissions(),
       counters: {
         receipt: 0,
         expense: 0,
@@ -479,17 +619,198 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     this.saveNormalizedState(state, workspaceId);
   }
 
-  private hasPermission(state: AqarDatabaseState, userId: string, perm: PermissionKey): boolean {
-    const user = state.users.find((u) => u.id === userId && u.active);
-    if (!user) return false;
-    if (user.role === 'sys_owner') return true;
-    return (state.rolePermissions[user.role] || []).includes(perm);
+  private persistSecurityAuditImmediate(state: AqarDatabaseState, entry: AuditLog, workspaceId: string) {
+    if (!state.auditLogs) state.auditLogs = [];
+    state.auditLogs.unshift(entry);
+    if (state.auditLogs.length > 500) {
+      state.auditLogs = state.auditLogs.slice(0, 500);
+    }
+    const sql = this.ctx.storage.sql;
+    this.ctx.storage.transactionSync(() => {
+      sql.exec("DELETE FROM entities WHERE collection = 'auditLogs'");
+      for (let idx = 0; idx < state.auditLogs.length; idx++) {
+        const item = state.auditLogs[idx];
+        sql.exec(
+          'INSERT INTO entities (collection, id, company_id, sort_order, revision, updated_at, data) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          'auditLogs',
+          item.id,
+          workspaceId || 'default',
+          idx,
+          1,
+          item.createdAt || new Date().toISOString(),
+          JSON.stringify(item)
+        );
+      }
+    });
   }
 
-  private assertPermission(state: AqarDatabaseState, userId: string, perm: PermissionKey) {
-    if (!this.hasPermission(state, userId, perm)) {
-      throw new Error('ليست لديك الصلاحية اللازمة لتنفيذ هذا الإجراء');
+  private recordDeniedAccess(
+    state: AqarDatabaseState,
+    workspaceId: string,
+    actor: StaffUser | undefined,
+    action: string,
+    entityType: string,
+    entityId: string,
+    reason: string,
+    opts?: { propertyId?: string; deviceName?: string }
+  ) {
+    const entry: AuditLog = {
+      id: uid('aud'),
+      userId: actor?.id || 'anonymous',
+      userName: actor?.nameAr || 'غير معروف',
+      userRole: actor?.roleLabelAr || 'مستخدم',
+      deviceName: opts?.deviceName || actor?.deviceName || 'Cloudflare Edge',
+      action,
+      entityType,
+      entityId,
+      propertyId: opts?.propertyId,
+      summary: reason,
+      createdAt: new Date().toISOString(),
+    };
+    this.persistSecurityAuditImmediate(state, entry, workspaceId);
+  }
+
+  private getActingUser(state: AqarDatabaseState, userId: string): StaffUser {
+    const user = state.users.find((u) => u.id === userId && isUserAccountActive(u));
+    if (!user) {
+      throw new WorkerPermissionDeniedError('المستخدم غير موجود أو تم تعطيل حسابه');
     }
+    return user;
+  }
+
+  private hasPermission(state: AqarDatabaseState, userId: string, perm: PermissionKey): boolean {
+    const user = state.users.find((u) => u.id === userId && isUserAccountActive(u));
+    if (!user) return false;
+    return userHasLegacyPermission(state, user, perm);
+  }
+
+  private assertPermission(
+    state: AqarDatabaseState,
+    workspaceId: string,
+    userId: string,
+    perm: PermissionKey,
+    ctx?: { entityType?: string; entityId?: string; propertyId?: string; deviceName?: string }
+  ): StaffUser {
+    const user = this.getActingUser(state, userId);
+    if (!userHasLegacyPermission(state, user, perm)) {
+      const msg = 'ليست لديك الصلاحية اللازمة لتنفيذ هذا الإجراء';
+      this.recordDeniedAccess(
+        state,
+        workspaceId,
+        user,
+        'رفض محاولة إجراء غير مصرح به',
+        ctx?.entityType || 'RBAC',
+        ctx?.entityId || perm,
+        `${msg} (${perm})`,
+        { propertyId: ctx?.propertyId, deviceName: ctx?.deviceName }
+      );
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    return user;
+  }
+
+  private assertModuleAction(
+    state: AqarDatabaseState,
+    workspaceId: string,
+    userId: string,
+    module: PermissionModuleKey,
+    action: PermissionLevel,
+    ctx?: { entityType?: string; entityId?: string; propertyId?: string; deviceName?: string }
+  ): StaffUser {
+    const user = this.getActingUser(state, userId);
+    if (!userHasModuleAction(state, user, module, action)) {
+      const msg = `لا تملك صلاحية (${action}) على قسم (${module})`;
+      this.recordDeniedAccess(
+        state,
+        workspaceId,
+        user,
+        'رفض محاولة وصول أو إجراء غير مصرح به',
+        ctx?.entityType || 'RBAC',
+        ctx?.entityId || `${module}:${action}`,
+        msg,
+        { propertyId: ctx?.propertyId, deviceName: ctx?.deviceName }
+      );
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    return user;
+  }
+
+  private assertPropertyAccess(
+    state: AqarDatabaseState,
+    workspaceId: string,
+    user: StaffUser,
+    propertyId: string | undefined,
+    actionLabel: string,
+    entityType = 'Property',
+    entityId = propertyId || 'unscoped',
+    deviceName?: string
+  ): void {
+    if (!propertyId) {
+      if (userHasAllPropertiesAccess(state, user)) return;
+      const msg = `رفض ${actionLabel}: الحساب مقيد بنطاق عقارات ولا يملك صلاحية الوصول الشامل`;
+      this.recordDeniedAccess(state, workspaceId, user, 'رفض وصول بدون نطاق عقار', entityType, entityId, msg, { deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    const prop = state.properties.find((p) => p.id === propertyId);
+    if (prop && !canUserAccessCompany(state, user, prop.companyId)) {
+      const msg = `رفض ${actionLabel}: العقار يتبع شركة أخرى خارج نطاق حسابك`;
+      this.recordDeniedAccess(state, workspaceId, user, 'رفض وصول عبر الشركات', entityType, entityId, msg, { propertyId, deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    if (!canUserAccessProperty(state, user, propertyId)) {
+      const msg = `رفض ${actionLabel}: العقار (${propertyId}) خارج نطاق العقارات المصرح لك بها`;
+      this.recordDeniedAccess(state, workspaceId, user, 'رفض وصول خارج نطاق العقارات', entityType, entityId, msg, { propertyId, deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+  }
+
+  private getTenantLinkedPropertyIds(state: AqarDatabaseState, tenantId: string): string[] {
+    const set = new Set<string>();
+    for (const c of state.contracts) {
+      if (c.tenantId === tenantId && c.propertyId) set.add(c.propertyId);
+    }
+    for (const u of state.units) {
+      if ((u.currentTenantId === tenantId || u.linkedTenantId === tenantId) && u.propertyId) set.add(u.propertyId);
+    }
+    for (const l of state.leads) {
+      const tid = l.convertedToTenantId || l.convertedTenantId;
+      if (tid === tenantId && l.propertyId) set.add(l.propertyId);
+    }
+    return Array.from(set);
+  }
+
+  private assertTenantAccess(
+    state: AqarDatabaseState,
+    workspaceId: string,
+    user: StaffUser,
+    tenantId: string,
+    actionLabel: string,
+    deviceName?: string
+  ) {
+    const tenant = state.tenants.find((t) => t.id === tenantId);
+    if (!tenant) throw new Error('المستأجر غير موجود');
+    if (user.role === 'owner') {
+      const msg = `رفض ${actionLabel}: حساب المالك للقراءة فقط`;
+      this.recordDeniedAccess(state, workspaceId, user, 'رفض تعديل لحساب مالك', 'Tenant', tenant.id, msg, { deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    if (userHasAllPropertiesAccess(state, user)) return tenant;
+    const accessible = getAccessiblePropertyIdsSet(state, user);
+    if (accessible.size === 0) {
+      const msg = `رفض ${actionLabel}: حسابك مقيد بـ 0 عقار ولا يسمح بالوصول إلى ملفات المستأجرين`;
+      this.recordDeniedAccess(state, workspaceId, user, 'رفض وصول بمصفوفة عقارات فارغة', 'Tenant', tenant.id, msg, { deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    const linkedProps = this.getTenantLinkedPropertyIds(state, tenant.id);
+    if (linkedProps.length > 0 && !linkedProps.some((pid) => accessible.has(pid))) {
+      const msg = `رفض ${actionLabel}: المستأجر يرتبط بعقارات خارج نطاق صلاحياتك`;
+      this.recordDeniedAccess(state, workspaceId, user, 'رفض وصول لملف مستأجر خارج النطاق', 'Tenant', tenant.id, msg, {
+        propertyId: linkedProps[0],
+        deviceName,
+      });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    return tenant;
   }
 
   private bumpRevision(state: AqarDatabaseState, entityType: string, entityId: string) {
@@ -527,123 +848,61 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     }
   }
 
-  private getStateForUser(state: AqarDatabaseState, userId: string): AqarDatabaseState {
-    const user = state.users.find((u) => u.id === userId && u.active);
+  private getStateForUser(state: AqarDatabaseState, userId: string, workspaceId = 'default'): AqarDatabaseState {
+    const user = state.users.find((u) => u.id === userId && isUserAccountActive(u));
     if (!user) {
-      throw new Error('المستخدم غير موجود أو تم تعطيل حسابه');
+      throw new WorkerPermissionDeniedError('المستخدم غير موجود أو تم تعطيل حسابه');
     }
-    const clone = JSON.parse(JSON.stringify(state)) as AqarDatabaseState;
-    const perms = new Set(clone.rolePermissions[user.role] || []);
-    const canViewAudit = user.role === 'sys_owner' || perms.has('view_audit');
-    const canBackup = user.role === 'sys_owner' || perms.has('backup_restore');
-    const canManageUsers = user.role === 'sys_owner' || perms.has('manage_users');
+    return filterStateForUser(state, user, { workspaceId });
+  }
 
-    if (!canViewAudit) {
-      clone.auditLogs = [];
-      clone.loginHistory = [];
-    }
-    if (!canBackup) {
-      clone.backups = [];
-    }
-    if (!canManageUsers) {
-      clone.users = clone.users.map((u) =>
-        u.id === user.id
-          ? u
-          : {
-              ...u,
-              email: '',
-              phone: '',
-              security: undefined,
-            }
+  private revokeUserSessions(userId: string, workspaceId: string, reason: string, keepSessionId?: string): number {
+    if (keepSessionId) {
+      this.ctx.storage.sql.exec(
+        'UPDATE sessions SET revoked = 1 WHERE user_id = ? AND token_id != ?',
+        userId,
+        keepSessionId
       );
+    } else {
+      this.ctx.storage.sql.exec('UPDATE sessions SET revoked = 1 WHERE user_id = ?', userId);
     }
+    return this.disconnectUserWebSockets(userId, workspaceId, reason, undefined, keepSessionId);
+  }
 
-    // Company-level isolation when user is pinned to a specific company inside multi-branch setup
-    if (user.role !== 'sys_owner' && user.companyId && (clone.companies?.length || 0) > 1) {
-      const compId = user.companyId;
-      clone.companies = (clone.companies || []).filter((c) => c.id === compId);
-      clone.properties = clone.properties.filter((p) => !p.companyId || p.companyId === compId);
-      const compPropIds = new Set(clone.properties.map((p) => p.id));
-      clone.units = clone.units.filter((u) => compPropIds.has(u.propertyId));
-      clone.contracts = clone.contracts.filter((c) => compPropIds.has(c.propertyId));
-      const compContractIds = new Set(clone.contracts.map((c) => c.id));
-      const compTenantIds = new Set(clone.contracts.map((c) => c.tenantId));
-      clone.tenants = clone.tenants.filter((t) => compTenantIds.has(t.id));
-      clone.installments = clone.installments.filter((i) => compContractIds.has(i.contractId));
-      clone.payments = clone.payments.filter((p) => compPropIds.has(p.propertyId));
-      clone.expenses = clone.expenses.filter((e) => compPropIds.has(e.propertyId));
-      clone.tickets = clone.tickets.filter((t) => compPropIds.has(t.propertyId));
-    }
-
-    if (user.role === 'owner' && user.ownerId) {
-      const ownerId = user.ownerId;
-      clone.properties = clone.properties.filter((p) => p.ownerShares.some((s) => s.ownerId === ownerId));
-      const propIds = new Set(clone.properties.map((p) => p.id));
-      const unitIds = new Set(clone.units.filter((u) => propIds.has(u.propertyId)).map((u) => u.id));
-      clone.units = clone.units.filter((u) => unitIds.has(u.id));
-      clone.contracts = clone.contracts.filter((c) => propIds.has(c.propertyId));
-      const contractIds = new Set(clone.contracts.map((c) => c.id));
-      const tenantIds = new Set(clone.contracts.map((c) => c.tenantId));
-      clone.tenants = clone.tenants.filter((t) => tenantIds.has(t.id));
-      clone.handovers = clone.handovers.filter((h) => propIds.has(h.propertyId));
-      clone.meterReadings = (clone.meterReadings || []).filter((mr) => propIds.has(mr.propertyId));
-      clone.installments = clone.installments.filter((i) => contractIds.has(i.contractId));
-      clone.payments = clone.payments.filter((p) => propIds.has(p.propertyId));
-      clone.expenses = clone.expenses.filter((e) => propIds.has(e.propertyId) && e.approvalStatus === 'معتمد');
-      clone.supplierInvoices = (clone.supplierInvoices || []).filter((si) => propIds.has(si.propertyId));
-      clone.propertyBudgets = (clone.propertyBudgets || []).filter((pb) => propIds.has(pb.propertyId));
-      clone.tickets = clone.tickets.filter((t) => propIds.has(t.propertyId));
-      clone.tasks = clone.tasks.filter((t) => (t.propertyId && propIds.has(t.propertyId)) || t.assignedTo === user.id);
-      clone.owners = clone.owners.filter((o) => o.id === ownerId);
-      clone.documents = clone.documents.filter(
-        (d) =>
-          (d.relatedType === 'عقار' && propIds.has(d.relatedId)) ||
-          (d.relatedType === 'وحدة' && unitIds.has(d.relatedId)) ||
-          (d.relatedType === 'عقد' && contractIds.has(d.relatedId)) ||
-          (d.relatedType === 'مستأجر' && tenantIds.has(d.relatedId))
-      );
-      clone.leads = [];
-      clone.auditLogs = [];
-      clone.loginHistory = [];
-      clone.backups = [];
-    } else if (
-      user.allowedPropertyIds &&
-      user.allowedPropertyIds.length > 0 &&
-      user.role !== 'sys_owner' &&
-      user.role !== 'gm'
-    ) {
-      const allowed = new Set(user.allowedPropertyIds);
-      clone.properties = clone.properties.filter((p) => allowed.has(p.id));
-      const unitIds = new Set(clone.units.filter((u) => allowed.has(u.propertyId)).map((u) => u.id));
-      clone.units = clone.units.filter((u) => unitIds.has(u.id));
-      clone.contracts = clone.contracts.filter((c) => allowed.has(c.propertyId));
-      const contractIds = new Set(clone.contracts.map((c) => c.id));
-      const tenantIds = new Set(clone.contracts.map((c) => c.tenantId));
-      clone.tenants = clone.tenants.filter((t) => tenantIds.has(t.id));
-      clone.handovers = clone.handovers.filter((h) => allowed.has(h.propertyId));
-      clone.meterReadings = (clone.meterReadings || []).filter((mr) => allowed.has(mr.propertyId));
-      clone.installments = clone.installments.filter((i) => contractIds.has(i.contractId));
-      clone.payments = clone.payments.filter((p) => allowed.has(p.propertyId));
-      clone.expenses = clone.expenses.filter((e) => allowed.has(e.propertyId));
-      clone.supplierInvoices = (clone.supplierInvoices || []).filter((si) => allowed.has(si.propertyId));
-      clone.propertyBudgets = (clone.propertyBudgets || []).filter((pb) => allowed.has(pb.propertyId));
-      clone.tickets = clone.tickets.filter((t) => allowed.has(t.propertyId));
-      clone.tasks = clone.tasks.filter((t) => !t.propertyId || allowed.has(t.propertyId) || t.assignedTo === user.id);
-      clone.leads = clone.leads.filter((l) => !l.propertyId || allowed.has(l.propertyId));
-      clone.documents = clone.documents.filter(
-        (d) =>
-          d.relatedType === 'شركة' ||
-          (d.relatedType === 'عقار' && allowed.has(d.relatedId)) ||
-          (d.relatedType === 'وحدة' && unitIds.has(d.relatedId)) ||
-          (d.relatedType === 'عقد' && contractIds.has(d.relatedId)) ||
-          (d.relatedType === 'مستأجر' && tenantIds.has(d.relatedId))
-      );
-      if (canViewAudit) {
-        clone.auditLogs = clone.auditLogs.filter((a) => !a.propertyId || allowed.has(a.propertyId));
+  private disconnectUserWebSockets(
+    userId: string,
+    workspaceId: string,
+    reason: string,
+    targetSessionId?: string,
+    excludeSessionId?: string
+  ): number {
+    let closed = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      const meta = ws.deserializeAttachment() as WsAttachment | null;
+      if (!meta || !meta.authenticated) continue;
+      if (meta.workspaceId !== workspaceId || meta.userId !== userId) continue;
+      if (targetSessionId && meta.sessionId !== targetSessionId) continue;
+      if (excludeSessionId && meta.sessionId === excludeSessionId) continue;
+      try {
+        ws.send(
+          JSON.stringify({
+            type: 'session:terminated',
+            userId: meta.userId,
+            sessionId: meta.sessionId,
+            reason,
+          })
+        );
+      } catch {
+        // ignore send error
       }
+      try {
+        ws.close(4001, 'Session terminated');
+      } catch {
+        // ignore close error
+      }
+      closed += 1;
     }
-
-    return clone;
+    return closed;
   }
 
   private extractToken(req: Request): string | null {
@@ -666,7 +925,6 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     const claims = await verifyTokenWeb(rawToken, this.sessionSecretCache);
     if (!claims) return null;
 
-    // Enforce cryptographic workspace binding
     if (claims.wid && claims.wid !== workspaceId) {
       return null;
     }
@@ -690,7 +948,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       return null;
     }
 
-    const user = state.users.find((u) => u.id === claims.uid && u.active);
+    const user = state.users.find((u) => u.id === claims.uid && isUserAccountActive(u));
     if (!user) return null;
 
     const rawDevice = req.headers.get('x-device-name');
@@ -713,30 +971,83 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     };
   }
 
+  private buildSessionHeaders(
+    accessToken: string,
+    refreshToken: string | undefined,
+    rememberMe: boolean,
+    accessTtlMs: number,
+    secure: boolean
+  ): Headers {
+    const headers = new Headers();
+    const secAttr = secure ? '; Secure' : '';
+    const accessMaxAge = rememberMe ? `; Max-Age=${Math.floor(accessTtlMs / 1000)}` : '';
+    headers.append(
+      'Set-Cookie',
+      `${SESSION_COOKIE_NAME}=${encodeURIComponent(accessToken)}; Path=/; HttpOnly; SameSite=Lax${secAttr}${accessMaxAge}`
+    );
+    if (rememberMe && refreshToken) {
+      headers.append(
+        'Set-Cookie',
+        `${REFRESH_COOKIE_NAME}=${encodeURIComponent(refreshToken)}; Path=/; HttpOnly; SameSite=Lax${secAttr}; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`
+      );
+    } else {
+      headers.append('Set-Cookie', `${REFRESH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${secAttr}; Max-Age=0`);
+    }
+    return headers;
+  }
+
   private async issueSession(
     user: StaffUser,
     workspaceId: string,
-    deviceName: string
-  ): Promise<{ token: string; cookieHeader: string }> {
+    deviceName: string,
+    opts?: { rememberMe?: boolean; appType?: 'web' | 'desktop'; secure?: boolean }
+  ): Promise<{
+    token: string;
+    refreshToken?: string;
+    expiresAt: string;
+    refreshExpiresAt?: string;
+    sessionId: string;
+    rememberMe: boolean;
+    headers: Headers;
+  }> {
+    const rememberMe = opts?.rememberMe !== false;
+    const isDesktop = opts?.appType === 'desktop';
     const now = Date.now();
-    const exp = now + SESSION_TTL_MS;
+    const accessTtlMs = rememberMe ? ACCESS_TOKEN_TTL_MS : SESSION_SHORT_TTL_MS;
+    const exp = now + accessTtlMs;
     const expiresAt = new Date(exp).toISOString();
+    const refreshTtlMs = rememberMe ? SESSION_TTL_MS : SESSION_SHORT_TTL_MS;
+    const refreshExpiresAt = rememberMe ? new Date(now + refreshTtlMs).toISOString() : undefined;
+    const rawRefreshToken = rememberMe ? randomHexWeb(32) : undefined;
+    const refreshHash = rawRefreshToken ? await sha256HexWeb(rawRefreshToken) : null;
     const sid = `ses-${crypto.randomUUID().slice(0, 12)}`;
     const token = await signTokenWeb(
       { sid, uid: user.id, wid: workspaceId, role: user.role, deviceName, iat: now, exp },
       this.sessionSecretCache!
     );
     this.ctx.storage.sql.exec(
-      'INSERT INTO sessions (token_id, user_id, workspace_id, device_name, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, 0)',
+      'INSERT INTO sessions (token_id, user_id, workspace_id, device_name, app_type, remember_me, refresh_token_hash, refresh_expires_at, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
       sid,
       user.id,
       workspaceId,
       deviceName,
+      isDesktop ? 'desktop' : 'web',
+      rememberMe ? 1 : 0,
+      refreshHash,
+      refreshExpiresAt || null,
       new Date(now).toISOString(),
       expiresAt
     );
-    const cookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`;
-    return { token, cookieHeader };
+    const headers = this.buildSessionHeaders(token, rawRefreshToken, rememberMe, accessTtlMs, Boolean(opts?.secure));
+    return {
+      token,
+      refreshToken: isDesktop ? rawRefreshToken : undefined,
+      expiresAt,
+      refreshExpiresAt,
+      sessionId: sid,
+      rememberMe,
+      headers,
+    };
   }
 
   private checkAccountLock(userId: string): { locked: boolean; retryAfterSec?: number } {
@@ -802,11 +1113,11 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     return out;
   }
 
-  private broadcastStateChange(state: AqarDatabaseState, actorUserId: string, summary: string) {
+  private broadcastStateChange(state: AqarDatabaseState, actorUserId: string, summary: string, workspaceId: string) {
     const presence = this.getPresenceList(state);
     for (const ws of this.ctx.getWebSockets()) {
       const meta = ws.deserializeAttachment() as WsAttachment | null;
-      if (!meta || !meta.authenticated) continue;
+      if (!meta || !meta.authenticated || meta.workspaceId !== workspaceId) continue;
       try {
         ws.send(
           JSON.stringify({
@@ -814,13 +1125,20 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
             actorUserId,
             summary,
             presence,
-            state: this.getStateForUser(state, meta.userId),
+            state: this.getStateForUser(state, meta.userId, workspaceId),
           })
         );
       } catch {
         // ignore broken ws socket
       }
     }
+  }
+
+  private normalizeAllowedPropertiesInput(input: unknown): string[] | undefined {
+    if (!Array.isArray(input)) return undefined;
+    const cleaned = input.map((id) => String(id).trim()).filter(Boolean);
+    if (cleaned.includes(ALL_PROPERTIES_SCOPE)) return [ALL_PROPERTIES_SCOPE];
+    return Array.from(new Set(cleaned));
   }
 
   private async handleMutation(
@@ -834,23 +1152,71 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     const { userId, workspaceId, deviceName } = actor;
 
     if (method === 'PATCH' && pathname === '/api/settings') {
-      const user = state.users.find((u) => u.id === userId);
-      if (!user || (user.role !== 'sys_owner' && user.role !== 'gm' && !this.hasPermission(state, userId, 'manage_users'))) {
-        throw new Error('تعديل إعدادات المنشأة متاح فقط لمالك النظام أو المدير العام');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'settings', 'edit', {
+        entityType: 'CompanySettings',
+        entityId: 'settings',
+        deviceName,
+      });
+      if (user.role !== 'sys_owner' && user.role !== 'gm') {
+        const msg = 'تعديل إعدادات المنشأة متاح فقط لمالك النظام أو المدير العام';
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض تعديل الإعدادات', 'CompanySettings', 'settings', msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
       }
       state.settings = { ...state.settings, ...body };
       this.bumpRevision(state, 'settings', 'company');
       this.appendAudit(state, userId, 'تحديث الإعدادات', 'إعدادات', 'company', 'تحديث إعدادات المنشأة', deviceName);
       this.persistState(state, workspaceId);
-      return { settings: state.settings, state: this.getStateForUser(state, userId) };
+      return { settings: state.settings, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'POST' && pathname === '/api/companies') {
+      const user = this.assertPermission(state, workspaceId, userId, 'manage_users', {
+        entityType: 'CompanyProfile',
+        deviceName,
+      });
+      if (user.role !== 'sys_owner') {
+        const msg = 'إنشاء شركة عقارية أو فرع جديد محصور بمالك النظام فقط';
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض إنشاء شركة جديدة', 'CompanyProfile', 'create', msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
+      if (!state.companies) state.companies = [];
+      const company = {
+        id: uid('comp'),
+        nameAr: String(body.nameAr || 'فرع جديد'),
+        nameEn: String(body.nameEn || body.nameAr || 'New Company'),
+        logoText: String(body.logoText || ''),
+        crNumber: String(body.crNumber || ''),
+        vatNumber: String(body.vatNumber || ''),
+        address: String(body.address || ''),
+        city: String(body.city || state.settings.city || 'الرياض'),
+        phone: String(body.phone || ''),
+        email: String(body.email || ''),
+        bankName: String(body.bankName || ''),
+        iban: String(body.iban || ''),
+        receiptFooterAr: String(body.receiptFooterAr || ''),
+        isDefault: false,
+      };
+      state.companies.push(company);
+      this.bumpRevision(state, 'companies', company.id);
+      this.appendAudit(state, userId, 'إضافة شركة عقارية', 'CompanyProfile', company.id, `إضافة الشركة ${company.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { company, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/properties') {
-      this.assertPermission(state, userId, 'manage_properties');
-      const actorUser = state.users.find((u) => u.id === userId);
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'properties', 'create', {
+        entityType: 'Property',
+        deviceName,
+      });
+      const targetCompanyId = String(body.companyId || actorUser.companyId || state.companies?.[0]?.id || `comp-${workspaceId}`);
+      if (!canUserAccessCompany(state, actorUser, targetCompanyId)) {
+        const msg = 'رفض إضافة عقار: لا يمكنك الإضافة لشركة خارج نطاق حسابك';
+        this.recordDeniedAccess(state, workspaceId, actorUser, 'رفض إضافة عقار عبر الشركات', 'Property', 'create', msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       const prop = {
         id: uid('prop'),
-        companyId: String(body.companyId || actorUser?.companyId || state.companies?.[0]?.id || `comp-${workspaceId}`),
+        companyId: targetCompanyId,
         code: String(body.code || `PR-${state.properties.length + 101}`),
         nameAr: String(body.nameAr || 'عقار جديد'),
         nameEn: String(body.nameEn || body.nameAr || 'New Property'),
@@ -875,18 +1241,28 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         createdAt: now,
       };
       state.properties.unshift(prop);
+      if (!userHasAllPropertiesAccess(state, actorUser)) {
+        actorUser.allowedPropertyIds = Array.from(new Set([...(actorUser.allowedPropertyIds || []), prop.id]));
+      }
       this.bumpRevision(state, 'properties', prop.id);
       this.appendAudit(state, userId, 'إضافة عقار', 'عقار', prop.id, `إضافة العقار ${prop.nameAr}`, deviceName, prop.id);
       this.persistState(state, workspaceId);
-      return { property: prop, state: this.getStateForUser(state, userId) };
+      return { property: prop, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/units') {
-      this.assertPermission(state, userId, 'manage_properties');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'units', 'create', {
+        entityType: 'Unit',
+        propertyId: body.propertyId ? String(body.propertyId) : undefined,
+        deviceName,
+      });
+      const propertyId = String(body.propertyId || '');
+      if (!propertyId) throw new Error('يجب تحديد العقار لإضافة الوحدة');
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, 'إضافة وحدة', 'Unit', propertyId, deviceName);
       const monthly = Number(body.suggestedMonthlyRent || Math.round(Number(body.suggestedAnnualRent || 30000) / 12));
       const unit = {
         id: uid('unit'),
-        propertyId: String(body.propertyId || state.properties[0]?.id || ''),
+        propertyId,
         buildingName: String(body.buildingName || 'المبنى الرئيسي'),
         floor: Number(body.floor || 1),
         unitNumber: String(body.unitNumber || `${state.units.length + 101}`),
@@ -907,23 +1283,38 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       };
       state.units.push(unit);
       this.bumpRevision(state, 'units', unit.id);
+      this.appendAudit(state, userId, 'إضافة وحدة', 'وحدة', unit.id, `إضافة الوحدة ${unit.unitNumber}`, deviceName, unit.propertyId);
       this.persistState(state, workspaceId);
-      return { unit, state: this.getStateForUser(state, userId) };
+      return { unit, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     const unitStatusMatch = /^\/api\/units\/([^/]+)\/status$/.exec(pathname);
     if (method === 'PATCH' && unitStatusMatch) {
-      this.assertPermission(state, userId, 'manage_properties');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'units', 'edit', {
+        entityType: 'Unit',
+        entityId: unitStatusMatch[1],
+        deviceName,
+      });
       const unit = state.units.find((u) => u.id === unitStatusMatch[1]);
       if (!unit) throw new Error('الوحدة غير موجودة');
+      this.assertPropertyAccess(state, workspaceId, user, unit.propertyId, 'تحديث حالة وحدة', 'Unit', unit.id, deviceName);
       unit.status = body.status;
       this.bumpRevision(state, 'units', unit.id);
+      this.appendAudit(state, userId, 'تحديث حالة وحدة', 'وحدة', unit.id, `تغيير حالة الوحدة ${unit.unitNumber}`, deviceName, unit.propertyId);
       this.persistState(state, workspaceId);
-      return { unit, state: this.getStateForUser(state, userId) };
+      return { unit, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/tenants') {
-      this.assertPermission(state, userId, 'manage_tenants');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'tenants', 'create', {
+        entityType: 'Tenant',
+        deviceName,
+      });
+      if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        const msg = 'رفض تسجيل مستأجر: حسابك مقيد بـ 0 عقار مصرح به';
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض إضافة مستأجر بدون عقارات', 'Tenant', 'create', msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       const tenant = {
         id: uid('ten'),
         nameAr: String(body.nameAr || 'مستأجر جديد'),
@@ -940,40 +1331,66 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       };
       state.tenants.unshift(tenant);
       this.bumpRevision(state, 'tenants', tenant.id);
+      this.appendAudit(state, userId, 'تسجيل مستأجر', 'مستأجر', tenant.id, `تسجيل المستأجر ${tenant.nameAr}`, deviceName);
       this.persistState(state, workspaceId);
-      return { tenant, state: this.getStateForUser(state, userId) };
+      return { tenant, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     const tenantMatch = /^\/api\/tenants\/([^/]+)$/.exec(pathname);
     if (method === 'PATCH' && tenantMatch) {
-      this.assertPermission(state, userId, 'manage_tenants');
-      const tenant = state.tenants.find((t) => t.id === tenantMatch[1]);
-      if (!tenant) throw new Error('المستأجر غير موجود');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'tenants', 'edit', {
+        entityType: 'Tenant',
+        entityId: tenantMatch[1],
+        deviceName,
+      });
+      const tenant = this.assertTenantAccess(state, workspaceId, user, tenantMatch[1], 'تحديث بيانات المستأجر', deviceName);
       Object.assign(tenant, body);
       this.bumpRevision(state, 'tenants', tenant.id);
+      this.appendAudit(state, userId, 'تحديث مستأجر', 'مستأجر', tenant.id, `تحديث ملف المستأجر ${tenant.nameAr}`, deviceName);
       this.persistState(state, workspaceId);
-      return { tenant, state: this.getStateForUser(state, userId) };
+      return { tenant, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === 'DELETE' && tenantMatch) {
-      this.assertPermission(state, userId, 'manage_tenants');
-      state.tenants = state.tenants.filter((t) => t.id !== tenantMatch[1]);
-      this.bumpRevision(state, 'tenants', tenantMatch[1]);
+      const user = this.assertModuleAction(state, workspaceId, userId, 'tenants', 'delete_void', {
+        entityType: 'Tenant',
+        entityId: tenantMatch[1],
+        deviceName,
+      });
+      const tenant = this.assertTenantAccess(state, workspaceId, user, tenantMatch[1], 'حذف المستأجر', deviceName);
+      state.tenants = state.tenants.filter((t) => t.id !== tenant.id);
+      this.bumpRevision(state, 'tenants', tenant.id);
+      this.appendAudit(state, userId, 'حذف مستأجر', 'مستأجر', tenant.id, `حذف المستأجر ${tenant.nameAr}`, deviceName);
       this.persistState(state, workspaceId);
-      return { ok: true, state: this.getStateForUser(state, userId) };
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/contracts') {
-      this.assertPermission(state, userId, 'manage_contracts');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'contracts', 'create', {
+        entityType: 'LeaseContract',
+        propertyId: body.propertyId ? String(body.propertyId) : undefined,
+        deviceName,
+      });
       const unitId = String(body.unitId || '');
+      const unit = state.units.find((u) => u.id === unitId);
+      const propertyId = String(body.propertyId || unit?.propertyId || '');
+      if (!propertyId) throw new Error('يجب تحديد العقار المرتبط بالعقد');
+      if (unit && unit.propertyId !== propertyId) {
+        throw new Error('الوحدة المحددة لا تتبع للعقار المختار');
+      }
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, 'إنشاء عقد', 'LeaseContract', propertyId, deviceName);
+      const tenantId = String(body.tenantId || '');
+      if (tenantId) {
+        this.assertTenantAccess(state, workspaceId, user, tenantId, 'ربط مستأجر بعقد', deviceName);
+      }
       const contract = {
         id: uid('con'),
         internalNumber: String(body.internalNumber || `CNT-${state.contracts.length + 1001}`),
         ejarNumber: String(body.ejarNumber || ''),
         ejarStatus: body.ejarStatus || 'غير موثق',
         lifecycleStatus: 'نشط' as const,
-        propertyId: String(body.propertyId || state.properties[0]?.id || ''),
+        propertyId,
         unitId,
-        tenantId: String(body.tenantId || state.tenants[0]?.id || ''),
+        tenantId,
         startDate: String(body.startDate || now.slice(0, 10)),
         endDate: String(body.endDate || now.slice(0, 10)),
         annualRent: Number(body.annualRent || 30000),
@@ -988,24 +1405,32 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         createdAt: now,
       };
       state.contracts.unshift(contract);
-      const unit = state.units.find((u) => u.id === unitId);
       if (unit) {
         unit.status = 'مؤجرة';
         this.bumpRevision(state, 'units', unit.id);
       }
       this.bumpRevision(state, 'contracts', contract.id);
+      this.appendAudit(state, userId, 'إنشاء عقد', 'عقد', contract.id, `إنشاء العقد ${contract.internalNumber}`, deviceName, contract.propertyId);
       this.persistState(state, workspaceId);
-      return { contract, state: this.getStateForUser(state, userId) };
+      return { contract, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/payments') {
-      this.assertPermission(state, userId, 'collect_payments');
+      const user = this.assertPermission(state, workspaceId, userId, 'collect_payments', {
+        entityType: 'Payment',
+        entityId: String(body.contractId || 'payment'),
+        deviceName,
+      });
+      const contract = state.contracts.find((c) => c.id === body.contractId);
+      if (!contract) throw new Error('العقد غير موجود');
+      this.assertPropertyAccess(state, workspaceId, user, contract.propertyId, 'تحصيل دفعة', 'Payment', contract.id, deviceName);
+
       const amount = Number(body.amount || 0);
       if (amount <= 0) throw new Error('مبلغ التحصيل يجب أن يكون أكبر من صفر');
       const idempotencyKey = String(body.idempotencyKey || uid('idem'));
       const existing = state.payments.find((p) => p.idempotencyKey === idempotencyKey);
       if (existing) {
-        return { payment: existing, duplicate: true, state: this.getStateForUser(state, userId) };
+        return { payment: existing, duplicate: true, state: this.getStateForUser(state, userId, workspaceId) };
       }
       const refNo = body.referenceNumber ? String(body.referenceNumber).trim() : '';
       if (refNo) {
@@ -1013,11 +1438,9 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
           (p) => p.contractId === body.contractId && p.referenceNumber === refNo && p.amount === amount && p.status === 'معتمد'
         );
         if (dupRef) {
-          return { payment: dupRef, duplicate: true, state: this.getStateForUser(state, userId) };
+          return { payment: dupRef, duplicate: true, state: this.getStateForUser(state, userId, workspaceId) };
         }
       }
-      const contract = state.contracts.find((c) => c.id === body.contractId);
-      if (!contract) throw new Error('العقد غير موجود');
       state.counters.receipt += 1;
       const allocations: PaymentAllocation[] = [];
       if ((body.paymentType || 'إيجار') === 'إيجار') {
@@ -1063,14 +1486,19 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       this.bumpRevision(state, 'payments', payment.id);
       this.appendAudit(state, userId, 'تحصيل دفعة', 'دفعة', payment.id, `سند ${payment.receiptNumber} بمبلغ ${amount}`, deviceName, payment.propertyId);
       this.persistState(state, workspaceId);
-      return { payment, state: this.getStateForUser(state, userId) };
+      return { payment, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     const revPayMatch = /^\/api\/payments\/([^/]+)\/reverse$/.exec(pathname);
     if (method === 'POST' && revPayMatch) {
-      this.assertPermission(state, userId, 'reverse_receipts');
+      const user = this.assertPermission(state, workspaceId, userId, 'reverse_receipts', {
+        entityType: 'Payment',
+        entityId: revPayMatch[1],
+        deviceName,
+      });
       const orig = state.payments.find((p) => p.id === revPayMatch[1]);
       if (!orig) throw new Error('السند غير موجود');
+      this.assertPropertyAccess(state, workspaceId, user, orig.propertyId, 'عكس سند قبض', 'Payment', orig.id, deviceName);
       if (orig.status === 'معكوس') throw new Error('تم عكس هذا السند مسبقاً');
       const todayStr = now.slice(0, 10);
       for (const alloc of orig.allocations || []) {
@@ -1093,18 +1521,25 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       this.bumpRevision(state, 'payments', orig.id);
       this.appendAudit(state, userId, 'عكس سند', 'دفعة', orig.id, `عكس السند ${orig.receiptNumber}`, deviceName, orig.propertyId);
       this.persistState(state, workspaceId);
-      return { payment: orig, state: this.getStateForUser(state, userId) };
+      return { payment: orig, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/expenses') {
-      this.assertPermission(state, userId, 'create_expense');
+      const user = this.assertPermission(state, workspaceId, userId, 'create_expense', {
+        entityType: 'Expense',
+        propertyId: body.propertyId ? String(body.propertyId) : undefined,
+        deviceName,
+      });
+      const propertyId = String(body.propertyId || '');
+      if (!propertyId) throw new Error('يجب تحديد العقار للمصروف');
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, 'تسجيل مصروف', 'Expense', propertyId, deviceName);
       state.counters.expense += 1;
       const expense = {
         id: uid('exp'),
         expenseNumber: `EXP-${String(state.counters.expense).padStart(4, '0')}`,
         date: String(body.date || now.slice(0, 10)),
         category: body.category || 'صيانة',
-        propertyId: String(body.propertyId || state.properties[0]?.id || ''),
+        propertyId,
         unitId: body.unitId ? String(body.unitId) : undefined,
         vendorId: body.vendorId ? String(body.vendorId) : undefined,
         invoiceNumber: String(body.invoiceNumber || `INV-${Date.now().toString().slice(-5)}`),
@@ -1119,18 +1554,88 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       };
       state.expenses.unshift(expense);
       this.bumpRevision(state, 'expenses', expense.id);
+      this.appendAudit(state, userId, 'تسجيل مصروف', 'مصروف', expense.id, `تسجيل مصروف ${expense.expenseNumber}`, deviceName, expense.propertyId);
       this.persistState(state, workspaceId);
-      return { expense, state: this.getStateForUser(state, userId) };
+      return { expense, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    const expPatchMatch = /^\/api\/expenses\/([^/]+)$/.exec(pathname);
+    if (method === 'PATCH' && expPatchMatch) {
+      const user = this.assertModuleAction(state, workspaceId, userId, 'expenses', 'edit', {
+        entityType: 'Expense',
+        entityId: expPatchMatch[1],
+        deviceName,
+      });
+      const expense = state.expenses.find((e) => e.id === expPatchMatch[1]);
+      if (!expense) throw new Error('المصروف غير موجود');
+      this.assertPropertyAccess(state, workspaceId, user, expense.propertyId, 'تعديل مصروف', 'Expense', expense.id, deviceName);
+      Object.assign(expense, body);
+      this.bumpRevision(state, 'expenses', expense.id);
+      this.appendAudit(state, userId, 'تعديل مصروف', 'مصروف', expense.id, `تحديث المصروف ${expense.expenseNumber}`, deviceName, expense.propertyId);
+      this.persistState(state, workspaceId);
+      return { expense, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    const expDecisionMatch = /^\/api\/expenses\/([^/]+)\/decision$/.exec(pathname);
+    if (method === 'POST' && expDecisionMatch) {
+      const user = this.assertModuleAction(state, workspaceId, userId, 'expenses', 'approve', {
+        entityType: 'Expense',
+        entityId: expDecisionMatch[1],
+        deviceName,
+      });
+      const expense = state.expenses.find((e) => e.id === expDecisionMatch[1]);
+      if (!expense) throw new Error('المصروف غير موجود');
+      this.assertPropertyAccess(state, workspaceId, user, expense.propertyId, 'اعتماد مصروف', 'Expense', expense.id, deviceName);
+      if (expense.createdBy === userId && user.role !== 'sys_owner') {
+        const msg = 'فصل المهام (SoD): لا يمكنك اعتماد مصروف قمت بتسجيله بنفسك';
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض اعتماد ذاتي للمصروف', 'Expense', expense.id, msg, { propertyId: expense.propertyId, deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
+      const decision = body.decision === 'reject' ? 'reject' : 'approve';
+      const oldStatus = expense.approvalStatus;
+      if (decision === 'reject') {
+        expense.approvalStatus = 'مرفوض';
+        expense.rejectionReason = String(body.reason || 'رفض إداري');
+      } else if (expense.approvalStatus === 'بانتظار المشرف') {
+        if (!this.hasPermission(state, userId, 'approve_expense_supervisor') && !this.hasPermission(state, userId, 'approve_expense_manager') && user.role !== 'sys_owner') {
+          throw new WorkerPermissionDeniedError('تحتاج صلاحية اعتماد المشرف لهذه المرحلة');
+        }
+        expense.approvedBySupervisor = user.id;
+        expense.approvalStatus = expense.amount > 5000 ? 'بانتظار المدير' : 'معتمد';
+      } else if (expense.approvalStatus === 'بانتظار المدير') {
+        if (!this.hasPermission(state, userId, 'approve_expense_manager') && user.role !== 'sys_owner') {
+          throw new WorkerPermissionDeniedError('تحتاج صلاحية المدير العام لهذه المرحلة');
+        }
+        expense.approvedByManager = user.id;
+        expense.approvalStatus = expense.amount > 20000 ? 'بانتظار المالك' : 'معتمد';
+      } else if (expense.approvalStatus === 'بانتظار المالك') {
+        if (user.role !== 'owner' && user.role !== 'sys_owner' && user.role !== 'gm') {
+          throw new WorkerPermissionDeniedError('الموافقة النهائية للمصروفات الكبرى مخصصة للمالك أو مالك النظام');
+        }
+        expense.approvedByOwner = user.id;
+        expense.approvalStatus = 'معتمد';
+      }
+      this.bumpRevision(state, 'expenses', expense.id);
+      this.appendAudit(state, userId, 'قرار اعتماد مصروف', 'مصروف', expense.id, `تحديث ${expense.expenseNumber} من ${oldStatus} إلى ${expense.approvalStatus}`, deviceName, expense.propertyId);
+      this.persistState(state, workspaceId);
+      return { expense, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/tickets') {
-      this.assertPermission(state, userId, 'manage_maintenance');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'maintenance', 'create', {
+        entityType: 'MaintenanceTicket',
+        propertyId: body.propertyId ? String(body.propertyId) : undefined,
+        deviceName,
+      });
+      const propertyId = String(body.propertyId || '');
+      if (!propertyId) throw new Error('يجب تحديد العقار لبلاغ الصيانة');
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, 'فتح بلاغ صيانة', 'MaintenanceTicket', propertyId, deviceName);
       state.counters.ticket += 1;
       const ticket = {
         id: uid('tkt'),
         ticketNumber: `MNT-${String(state.counters.ticket).padStart(4, '0')}`,
-        propertyId: String(body.propertyId || state.properties[0]?.id || ''),
-        unitId: String(body.unitId || state.units[0]?.id || ''),
+        propertyId,
+        unitId: String(body.unitId || ''),
         source: body.source || 'المشرف',
         category: String(body.category || 'أخرى'),
         priority: body.priority || 'متوسط',
@@ -1145,30 +1650,49 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       };
       state.tickets.unshift(ticket);
       this.bumpRevision(state, 'tickets', ticket.id);
+      this.appendAudit(state, userId, 'فتح بلاغ صيانة', 'بلاغ صيانة', ticket.id, `فتح البلاغ ${ticket.ticketNumber}`, deviceName, ticket.propertyId);
       this.persistState(state, workspaceId);
-      return { ticket, state: this.getStateForUser(state, userId) };
+      return { ticket, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     const tktMatch = /^\/api\/tickets\/([^/]+)$/.exec(pathname);
     if (method === 'PATCH' && tktMatch) {
+      const user = this.getActingUser(state, userId);
       if (!this.hasPermission(state, userId, 'manage_maintenance') && !this.hasPermission(state, userId, 'execute_maintenance')) {
-        throw new Error('ليست لديك صلاحية تعديل بلاغات الصيانة');
+        const msg = 'ليست لديك صلاحية تعديل بلاغات الصيانة';
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض تعديل بلاغ صيانة', 'MaintenanceTicket', tktMatch[1], msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
       }
       const ticket = state.tickets.find((t) => t.id === tktMatch[1]);
       if (!ticket) throw new Error('بلاغ الصيانة غير موجود');
+      this.assertPropertyAccess(state, workspaceId, user, ticket.propertyId, 'تعديل بلاغ صيانة', 'MaintenanceTicket', ticket.id, deviceName);
       Object.assign(ticket, body, { updatedAt: now });
       this.bumpRevision(state, 'tickets', ticket.id);
+      this.appendAudit(state, userId, 'تحديث بلاغ صيانة', 'بلاغ صيانة', ticket.id, `تحديث البلاغ ${ticket.ticketNumber}`, deviceName, ticket.propertyId);
       this.persistState(state, workspaceId);
-      return { ticket, state: this.getStateForUser(state, userId) };
+      return { ticket, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/tasks') {
-      this.assertPermission(state, userId, 'manage_tasks');
+      const user = this.assertPermission(state, workspaceId, userId, 'manage_tasks', {
+        entityType: 'TaskItem',
+        propertyId: body.propertyId ? String(body.propertyId) : undefined,
+        deviceName,
+      });
+      if (body.propertyId) {
+        this.assertPropertyAccess(state, workspaceId, user, String(body.propertyId), 'إضافة مهمة', 'TaskItem', String(body.propertyId), deviceName);
+      } else if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        const msg = 'رفض إضافة مهمة: حسابك مقيد بـ 0 عقار';
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض إضافة مهمة بمصفوفة فارغة', 'TaskItem', 'create', msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       const task = {
         id: uid('tsk'),
         title: String(body.title || 'مهمة جديدة'),
         description: String(body.description || ''),
         type: String(body.type || 'متابعة'),
+        propertyId: body.propertyId ? String(body.propertyId) : undefined,
+        unitId: body.unitId ? String(body.unitId) : undefined,
         priority: body.priority || 'متوسط',
         assignedTo: String(body.assignedTo || userId),
         createdBy: userId,
@@ -1181,27 +1705,97 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       state.tasks.unshift(task);
       this.bumpRevision(state, 'tasks', task.id);
       this.persistState(state, workspaceId);
-      return { task, state: this.getStateForUser(state, userId) };
+      return { task, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     const tskMatch = /^\/api\/tasks\/([^/]+)$/.exec(pathname);
     if (method === 'PATCH' && tskMatch) {
-      this.assertPermission(state, userId, 'manage_tasks');
+      const user = this.assertPermission(state, workspaceId, userId, 'manage_tasks', {
+        entityType: 'TaskItem',
+        entityId: tskMatch[1],
+        deviceName,
+      });
       const task = state.tasks.find((t) => t.id === tskMatch[1]);
       if (!task) throw new Error('المهمة غير موجودة');
+      if (task.propertyId) {
+        this.assertPropertyAccess(state, workspaceId, user, task.propertyId, 'تحديث مهمة', 'TaskItem', task.id, deviceName);
+      } else if (!userHasAllPropertiesAccess(state, user) && task.assignedTo !== user.id) {
+        throw new WorkerPermissionDeniedError('رفض تحديث مهمة خارج نطاق حسابك');
+      }
       Object.assign(task, body);
       this.bumpRevision(state, 'tasks', task.id);
       this.persistState(state, workspaceId);
-      return { task, state: this.getStateForUser(state, userId) };
+      return { task, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'POST' && pathname === '/api/documents') {
+      const user = this.assertModuleAction(state, workspaceId, userId, 'documents', 'create', {
+        entityType: 'Document',
+        deviceName,
+      });
+      if (body.propertyId) {
+        this.assertPropertyAccess(state, workspaceId, user, String(body.propertyId), 'أرشفة مستند', 'Document', String(body.propertyId), deviceName);
+      } else if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        throw new WorkerPermissionDeniedError('رفض رفع مستند: لا توجد عقارات مصرح بها في حسابك');
+      }
+      const doc: AqarDatabaseState['documents'][number] = {
+        id: uid('doc'),
+        title: String(body.title || 'مستند'),
+        category: (body.category || 'مراسلات الشركة') as AqarDatabaseState['documents'][number]['category'],
+        relatedType: (body.relatedType || body.relatedEntityType || (body.propertyId ? 'عقار' : 'شركة')) as AqarDatabaseState['documents'][number]['relatedType'],
+        relatedId: String(body.relatedId || body.relatedEntityId || body.propertyId || ''),
+        propertyId: body.propertyId ? String(body.propertyId) : undefined,
+        relatedEntityType: body.relatedEntityType ? String(body.relatedEntityType) : undefined,
+        relatedEntityId: body.relatedEntityId ? String(body.relatedEntityId) : undefined,
+        fileName: String(body.fileName || 'file.pdf'),
+        fileType: String(body.fileType || 'application/pdf'),
+        fileSizeKb: Number(body.fileSizeKb || 128),
+        version: Number(body.version || 1),
+        dataUrl: body.dataUrl ? String(body.dataUrl) : undefined,
+        uploadedBy: userId,
+        createdAt: now,
+      };
+      state.documents.unshift(doc);
+      this.bumpRevision(state, 'documents', doc.id);
+      this.appendAudit(state, userId, 'أرشفة مستند', 'مستند', doc.id, `أرشفة ${doc.title}`, deviceName, doc.propertyId);
+      this.persistState(state, workspaceId);
+      return { doc, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'POST' && pathname === '/api/vendors') {
+      const user = this.assertPermission(state, workspaceId, userId, 'manage_maintenance', {
+        entityType: 'Vendor',
+        deviceName,
+      });
+      if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        throw new WorkerPermissionDeniedError('رفض إضافة مورد: حسابك مقيد بـ 0 عقار');
+      }
+      const vendor: AqarDatabaseState['vendors'][number] = {
+        id: uid('vnd'),
+        nameAr: String(body.nameAr || 'مورد جديد'),
+        nameEn: String(body.nameEn || body.nameAr || 'New Vendor'),
+        crNumber: String(body.crNumber || ''),
+        category: String(body.category || body.specialty || 'صيانة عامة'),
+        phone: String(body.phone || ''),
+        email: String(body.email || ''),
+        rating: Number(body.rating ?? 5),
+        active: body.active !== undefined ? Boolean(body.active) : true,
+      };
+      state.vendors.unshift(vendor);
+      this.bumpRevision(state, 'vendors', vendor.id);
+      this.persistState(state, workspaceId);
+      return { vendor, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/templates') {
+      const user = this.getActingUser(state, userId);
       if (
         !this.hasPermission(state, userId, 'manage_users') &&
         !this.hasPermission(state, userId, 'manage_contracts') &&
         !this.hasPermission(state, userId, 'manage_maintenance')
       ) {
-        throw new Error('ليست لديك صلاحية إنشاء قوالب التواصل');
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض إنشاء قالب تواصل', 'Template', 'create', 'ليست لديك صلاحية إنشاء قوالب التواصل', { deviceName });
+        throw new WorkerPermissionDeniedError('ليست لديك صلاحية إنشاء قوالب التواصل');
       }
       const template = {
         id: uid('tpl'),
@@ -1218,7 +1812,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       state.communicationTemplates = [template, ...(state.communicationTemplates || [])];
       this.bumpRevision(state, 'communicationTemplates', template.id);
       this.persistState(state, workspaceId);
-      return { template, state: this.getStateForUser(state, userId) };
+      return { template, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/notifications/read') {
@@ -1227,27 +1821,318 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         isReadBy: n.isReadBy.includes(userId) ? n.isReadBy : [...n.isReadBy, userId],
       }));
       this.persistState(state, workspaceId);
-      return { ok: true, state: this.getStateForUser(state, userId) };
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/permissions/toggle') {
-      this.assertPermission(state, userId, 'manage_users');
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'manage', {
+        entityType: 'RolePermissions',
+        entityId: String(body.role || 'role'),
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner' && actorUser.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('تعديل مصفوفة الصلاحيات محصور لمالك النظام أو المدير العام');
+      }
       const role = body.role as RoleKey;
       const perm = body.permission as PermissionKey;
-      if (role === 'sys_owner') throw new Error('لا يمكن تقليص صلاحيات مالك النظام');
+      if (role === 'sys_owner') {
+        throw new WorkerPermissionDeniedError('لا يمكن تقليص صلاحيات مالك النظام');
+      }
+      if (actorUser.role === 'gm' && role === 'gm') {
+        throw new WorkerPermissionDeniedError('لا يمكنك تعديل صلاحيات دورك بنفسك');
+      }
       const current = state.rolePermissions[role] || [];
       state.rolePermissions[role] = current.includes(perm)
         ? current.filter((p) => p !== perm)
         : [...current, perm];
+      this.appendAudit(state, userId, 'تحديث صلاحيات الدور', 'أدوار وصلاحيات', role, `تغيير الصلاحية ${perm} للدور ${role}`, deviceName);
       this.persistState(state, workspaceId);
-      return { rolePermissions: state.rolePermissions, state: this.getStateForUser(state, userId) };
+      return { rolePermissions: state.rolePermissions, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    // Team & Workforce Endpoints (Parity with Node)
+    if (method === 'POST' && pathname === '/api/team/users') {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'create', {
+        entityType: 'StaffUser',
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner' && actorUser.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('إضافة الموظفين متاحة لمالك النظام أو مدير الشركة فقط');
+      }
+      const targetRole = (body.role || 'leasing') as RoleKey;
+      if (actorUser.role !== 'sys_owner' && (targetRole === 'sys_owner' || targetRole === 'gm')) {
+        throw new WorkerPermissionDeniedError('تعيين مالك نظام أو مدير شركة حصري لمالك النظام');
+      }
+      const tmpl = ROLE_TEMPLATES.find((t) => t.key === targetRole);
+      const customRole = body.customRoleId ? (state.customRoles || []).find((r) => r.id === body.customRoleId) : undefined;
+      const email = String(body.email || '').trim().toLowerCase();
+      if (!email) throw new Error('البريد الإلكتروني مطلوب');
+      if (state.users.some((u) => u.email.toLowerCase() === email)) {
+        throw new Error('البريد الإلكتروني مستخدم لحساب آخر');
+      }
+      const allowedProps = this.normalizeAllowedPropertiesInput(body.allowedPropertyIds);
+      const newUser: StaffUser = {
+        id: uid('usr'),
+        companyId: actorUser.role === 'sys_owner' ? String(body.companyId || actorUser.companyId || `comp-${workspaceId}`) : actorUser.companyId,
+        nameAr: String(body.nameAr || 'موظف جديد').trim(),
+        nameEn: String(body.nameEn || body.nameAr || 'New Staff').trim(),
+        email,
+        phone: String(body.phone || '').trim(),
+        role: targetRole,
+        customRoleId: customRole?.id || (body.customRoleId ? String(body.customRoleId) : undefined),
+        customModulePermissions: body.customModulePermissions ?? body.customPermissions,
+        roleLabelAr: customRole?.nameAr || tmpl?.labelAr || 'موظف',
+        roleLabelEn: customRole?.nameEn || tmpl?.labelEn || 'Staff',
+        approvalLimitSar: Number(body.approvalLimitSar ?? tmpl?.defaultLimitSar ?? 0),
+        allowedPropertyIds: allowedProps,
+        deviceName: String(body.deviceName || 'Web Terminal'),
+        lastActiveAt: now,
+        statusState: 'متصل',
+        active: true,
+        accountStatus: 'نشط',
+        createdAt: now,
+      };
+      state.users.push(newUser);
+      const password = String(body.password || '').trim() || randomHexWeb(18);
+      const pin = String(body.pin || '').trim();
+      const pwHash = await hashSecretWeb(password);
+      const pinHash = /^\d{4,6}$/.test(pin) ? await hashSecretWeb(pin) : null;
+      this.ctx.storage.sql.exec(
+        'INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)',
+        newUser.id,
+        pwHash,
+        pinHash,
+        now
+      );
+      this.bumpRevision(state, 'users', newUser.id);
+      this.appendAudit(state, userId, 'إضافة موظف جديد', 'فريق العمل', newUser.id, `إضافة ${newUser.nameAr} (${newUser.role})`, deviceName);
+      this.persistState(state, workspaceId);
+      return { user: sanitizeUserForClient(newUser), state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    const teamUserMatch = /^\/api\/team\/users\/([^/]+)$/.exec(pathname);
+    if (method === 'PATCH' && teamUserMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'edit', {
+        entityType: 'StaffUser',
+        entityId: teamUserMatch[1],
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner' && actorUser.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('تعديل حسابات الموظفين حصري لمالك النظام أو مدير الشركة');
+      }
+      const target = state.users.find((u) => u.id === teamUserMatch[1]);
+      if (!target) throw new Error('المستخدم غير موجود');
+      if (actorUser.role !== 'sys_owner' && (target.role === 'sys_owner' || target.role === 'gm')) {
+        throw new WorkerPermissionDeniedError('لا يمكنك تعديل حساب مالك النظام أو مدير الشركة');
+      }
+      if (actorUser.role === 'gm' && actorUser.companyId && target.companyId && actorUser.companyId !== target.companyId) {
+        throw new WorkerPermissionDeniedError('لا يمكنك تعديل موظف يتبع شركة أخرى');
+      }
+      if (target.id === actorUser.id && (body.role !== undefined || body.customRoleId !== undefined || body.customModulePermissions !== undefined || body.customPermissions !== undefined || body.active === false)) {
+        throw new WorkerPermissionDeniedError('لا يمكنك تعديل دورك أو صلاحياتك الخاصة');
+      }
+
+      const prevTargetSnapshot: StaffUser = {
+        ...target,
+        allowedPropertyIds: Array.isArray(target.allowedPropertyIds) ? [...target.allowedPropertyIds] : undefined,
+      };
+      const prevRole = target.role;
+      const nextRole = (body.role ?? target.role) as RoleKey;
+      const nextCustomRoleId = body.customRoleId !== undefined ? (body.customRoleId ? String(body.customRoleId) : undefined) : target.customRoleId;
+      const nextScope =
+        body.allowedPropertyIds !== undefined ? this.normalizeAllowedPropertiesInput(body.allowedPropertyIds) : target.allowedPropertyIds;
+      const nextActive = body.active !== undefined ? Boolean(body.active) : target.active;
+      const nextStatus = body.accountStatus || (nextActive ? 'نشط' : 'موقوف');
+
+      if (actorUser.role !== 'sys_owner' && (nextRole === 'sys_owner' || nextRole === 'gm')) {
+        throw new WorkerPermissionDeniedError('لا يملك مدير الشركة صلاحية ترقية موظف لدور قيادي');
+      }
+
+      target.role = nextRole;
+      target.customRoleId = nextCustomRoleId;
+      if (body.customModulePermissions !== undefined || body.customPermissions !== undefined) {
+        target.customModulePermissions = body.customModulePermissions ?? body.customPermissions;
+      }
+      if (body.allowedPropertyIds !== undefined) target.allowedPropertyIds = nextScope;
+      if (body.approvalLimitSar !== undefined) target.approvalLimitSar = Number(body.approvalLimitSar);
+      if (body.nameAr !== undefined) target.nameAr = String(body.nameAr);
+      if (body.nameEn !== undefined) target.nameEn = String(body.nameEn);
+      target.active = nextActive && nextStatus === 'نشط';
+      target.accountStatus = nextStatus;
+
+      const roleChanged = isRoleDowngrade(prevRole, nextRole) || prevRole !== nextRole;
+      const scopeShrank = isPropertyScopeShrink(state, prevTargetSnapshot, state, target);
+      const suspended = !target.active;
+
+      if (suspended || roleChanged || scopeShrank) {
+        this.revokeUserSessions(
+          target.id,
+          workspaceId,
+          suspended ? 'تم إيقاف الحساب من قِبل الإدارة' : 'تم تحديث صلاحيات أو نطاق العقارات — يرجى إعادة تسجيل الدخول'
+        );
+      }
+
+      this.bumpRevision(state, 'users', target.id);
+      this.appendAudit(state, userId, 'تحديث ملف موظف', 'فريق العمل', target.id, `تحديث ${target.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { user: sanitizeUserForClient(target), state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'DELETE' && teamUserMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'delete_void', {
+        entityType: 'StaffUser',
+        entityId: teamUserMatch[1],
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner') {
+        throw new WorkerPermissionDeniedError('حذف المستخدمين حصري لمالك النظام فقط');
+      }
+      const target = state.users.find((u) => u.id === teamUserMatch[1]);
+      if (!target) throw new Error('المستخدم غير موجود');
+      if (target.id === actorUser.id) throw new WorkerPermissionDeniedError('لا يمكنك حذف حسابك الحالي');
+      state.users = state.users.filter((u) => u.id !== target.id);
+      this.ctx.storage.sql.exec('DELETE FROM user_credentials WHERE user_id = ?', target.id);
+      this.revokeUserSessions(target.id, workspaceId, 'تم حذف الحساب بواسطة مالك النظام');
+      this.appendAudit(state, userId, 'حذف حساب موظف', 'فريق العمل', target.id, `حذف ${target.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'POST' && pathname === '/api/roles') {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'manage', {
+        entityType: 'CustomRole',
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner' && actorUser.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('إنشاء الأدوار المخصصة حصري لمالك النظام أو مدير الشركة');
+      }
+      const roleDef: CustomRoleDefinition = {
+        id: uid('role'),
+        companyId: String(body.companyId || actorUser.companyId || state.companies?.[0]?.id || `comp-${workspaceId}`),
+        nameAr: String(body.nameAr || 'دور مخصص'),
+        nameEn: String(body.nameEn || body.nameAr || 'Custom Role'),
+        descriptionAr: String(body.descriptionAr || body.descAr || ''),
+        baseRoleKey: (body.baseRoleKey || body.baseRole || 'leasing') as RoleKey,
+        legacyPermissions: Array.isArray(body.legacyPermissions) ? body.legacyPermissions : [],
+        modulePermissions: body.modulePermissions || {},
+        createdAt: now,
+        updatedAt: now,
+        createdBy: userId,
+      };
+      if (!state.customRoles) state.customRoles = [];
+      state.customRoles.push(roleDef);
+      this.bumpRevision(state, 'customRoles', roleDef.id);
+      this.appendAudit(state, userId, 'إنشاء دور مخصص', 'أدوار وصلاحيات', roleDef.id, `إنشاء الدور ${roleDef.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { role: roleDef, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    const roleItemMatch = /^\/api\/roles\/([^/]+)$/.exec(pathname);
+    if (method === 'PATCH' && roleItemMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'manage', {
+        entityType: 'CustomRole',
+        entityId: roleItemMatch[1],
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner' && actorUser.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('تعديل الأدوار المخصصة حصري لمالك النظام أو مدير الشركة');
+      }
+      const roleDef = (state.customRoles || []).find((r) => r.id === roleItemMatch[1]);
+      if (!roleDef) throw new Error('الدور المخصص غير موجود');
+      Object.assign(roleDef, {
+        nameAr: body.nameAr ?? roleDef.nameAr,
+        nameEn: body.nameEn ?? roleDef.nameEn,
+        descriptionAr: body.descriptionAr ?? body.descAr ?? roleDef.descriptionAr,
+        modulePermissions: body.modulePermissions ?? roleDef.modulePermissions,
+        legacyPermissions: Array.isArray(body.legacyPermissions) ? body.legacyPermissions : roleDef.legacyPermissions,
+        updatedAt: now,
+      });
+      this.bumpRevision(state, 'customRoles', roleDef.id);
+      this.appendAudit(state, userId, 'تحديث دور مخصص', 'أدوار وصلاحيات', roleDef.id, `تحديث ${roleDef.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { role: roleDef, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'DELETE' && roleItemMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'manage', {
+        entityType: 'CustomRole',
+        entityId: roleItemMatch[1],
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner') {
+        throw new WorkerPermissionDeniedError('حذف الأدوار المخصصة حصري لمالك النظام');
+      }
+      state.customRoles = (state.customRoles || []).filter((r) => r.id !== roleItemMatch[1]);
+      this.appendAudit(state, userId, 'حذف دور مخصص', 'أدوار وصلاحيات', roleItemMatch[1], 'حذف دور مخصص', deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'POST' && pathname === '/api/roles/module-matrix') {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'manage', {
+        entityType: 'RoleMatrix',
+        entityId: String(body.role || ''),
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner' && actorUser.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('تعديل مصفوفة الصلاحيات حصري لمالك النظام أو مدير الشركة');
+      }
+      const targetRole = body.role as RoleKey;
+      if (targetRole === 'sys_owner') {
+        throw new WorkerPermissionDeniedError('لا يمكن تعديل صلاحيات مالك النظام');
+      }
+      if (actorUser.role === 'gm' && targetRole === 'gm') {
+        throw new WorkerPermissionDeniedError('لا يمكنك تعديل مصفوفة دورك بنفسك');
+      }
+      if (!state.roleModulePermissions) state.roleModulePermissions = buildAllDefaultRoleModulePermissions();
+      state.roleModulePermissions[targetRole] = body.modulePermissions || {};
+      state.rolePermissions[targetRole] = deriveLegacyPermissionsFromModules(body.modulePermissions || {});
+      this.appendAudit(state, userId, 'تحديث مصفوفة الصلاحيات', 'أدوار وصلاحيات', targetRole, `تحديث مصفوفة ${targetRole}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { roleModulePermissions: state.roleModulePermissions, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+
+    if (method === 'POST' && pathname === '/api/team/sessions/terminate') {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'team', 'manage', {
+        entityType: 'StaffSession',
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner' && actorUser.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('إنهاء الجلسات عن بُعد حصري لمالك النظام أو مدير الشركة');
+      }
+      const targetUserId = body.userId ? String(body.userId) : undefined;
+      const targetSessionId = body.sessionId ? String(body.sessionId) : undefined;
+      let terminatedCount = 0;
+      if (targetUserId) {
+        const target = state.users.find((u) => u.id === targetUserId);
+        if (!target) throw new Error('المستخدم غير موجود');
+        if (actorUser.role === 'gm' && (target.role === 'sys_owner' || target.role === 'gm')) {
+          throw new WorkerPermissionDeniedError('لا يمكنك إنهاء جلسات مالك النظام أو مدير شركة');
+        }
+        if (actorUser.role === 'gm' && actorUser.companyId && target.companyId && actorUser.companyId !== target.companyId) {
+          throw new WorkerPermissionDeniedError('لا يمكنك إنهاء جلسات موظف يتبع شركة أخرى');
+        }
+        if (!targetSessionId) {
+          terminatedCount = this.revokeUserSessions(targetUserId, workspaceId, String(body.reason || 'إنهاء جلسة إداري عن بُعد'));
+        } else {
+          this.ctx.storage.sql.exec('UPDATE sessions SET revoked = 1 WHERE user_id = ? AND token_id = ?', targetUserId, targetSessionId);
+          terminatedCount = this.disconnectUserWebSockets(targetUserId, workspaceId, String(body.reason || 'إنهاء جلسة إداري عن بُعد'), targetSessionId);
+        }
+      }
+      this.appendAudit(state, userId, 'إنهاء جلسات عن بُعد', 'جلسات الأمان', targetUserId || targetSessionId || 'session', `إنهاء ${terminatedCount} جلسة`, deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, terminatedCount, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     const resolveConflictMatch = /^\/api\/(?:team|sync)\/conflicts\/([^/]+)\/resolve$/.exec(pathname);
     if (method === 'POST' && resolveConflictMatch) {
-      const user = state.users.find((u) => u.id === userId);
-      if (!user || (user.role !== 'sys_owner' && user.role !== 'gm' && !this.hasPermission(state, userId, 'manage_users'))) {
-        throw new Error('اعتماد حل تعارضات المزامنة متاح فقط لمالك النظام أو المدير العام');
+      const user = this.assertModuleAction(state, workspaceId, userId, 'team', 'manage', {
+        entityType: 'SyncConflict',
+        entityId: resolveConflictMatch[1],
+        deviceName,
+      });
+      if (user.role !== 'sys_owner' && user.role !== 'gm') {
+        throw new WorkerPermissionDeniedError('اعتماد حل تعارضات المزامنة متاح فقط لمالك النظام أو المدير العام');
       }
       const cnf = (state.syncConflicts || []).find((c) => c.id === resolveConflictMatch[1]);
       if (!cnf) throw new Error('سجل التعارض غير موجود');
@@ -1260,11 +2145,17 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       cnf.resolvedAt = now;
       this.appendAudit(state, userId, 'حل تعارض مزامنة', 'نظام', cnf.id, `معالجة تعارض ${cnf.entityLabel}`, deviceName);
       this.persistState(state, workspaceId);
-      return { conflict: cnf, state: this.getStateForUser(state, userId) };
+      return { conflict: cnf, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     if (method === 'POST' && pathname === '/api/workspace/reset-fresh') {
-      this.assertPermission(state, userId, 'backup_restore');
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, 'settings', 'manage', {
+        entityType: 'WorkspaceReset',
+        deviceName,
+      });
+      if (actorUser.role !== 'sys_owner') {
+        throw new WorkerPermissionDeniedError('إعادة تهيئة مساحة العمل حصرية لمالك النظام فقط');
+      }
       state.properties = [];
       state.units = [];
       state.tenants = [];
@@ -1276,8 +2167,10 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       state.tickets = [];
       state.tasks = [];
       state.documents = [];
+      // Preserve immutable auditLogs across workspace reset
+      this.appendAudit(state, userId, 'تهيئة مساحة عمل نظيفة', 'النظام', 'workspace-reset', 'مسح البيانات التشغيلية مع الإبقاء على سجل التدقيق', deviceName);
       this.persistState(state, workspaceId);
-      return { ok: true, state: this.getStateForUser(state, userId) };
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
     }
 
     throw new Error(`مسار غير مدعوم بعد في الخادم السحابي: ${method} ${pathname}`);
@@ -1288,6 +2181,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
     const pathname = url.pathname;
     const workspaceId = resolveRequestWorkspace(request);
     const state = await this.ensureBootstrapped(workspaceId);
+    const secureReq = isSecureRequest(request);
 
     // 1. WebSocket Upgrade (Hibernation API)
     if (pathname === '/ws') {
@@ -1311,7 +2205,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         server.send(
           JSON.stringify({
             type: 'state:init',
-            state: this.getStateForUser(state, attachment.userId),
+            state: this.getStateForUser(state, attachment.userId, workspaceId),
             presence: this.getPresenceList(state),
           })
         );
@@ -1354,6 +2248,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       const adminPhone = String(body.adminPhone || '').trim();
       const password = String(body.password || '');
       const pin = String(body.pin || '').trim();
+      const appType: 'web' | 'desktop' = body.appType === 'desktop' ? 'desktop' : 'web';
 
       if (!companyNameAr || !adminNameAr || !adminEmail || password.length < 8) {
         return jsonResponse(
@@ -1383,6 +2278,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         lastActiveAt: provNow,
         statusState: 'متصل',
         active: true,
+        accountStatus: 'نشط',
         security: {
           hasPin: Boolean(pin),
           lastPasswordChangedAt: provNow,
@@ -1393,27 +2289,38 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       this.saveNormalizedState(fresh, workspaceId);
 
       const pwHash = await hashSecretWeb(password);
-      const pinHash = await hashSecretWeb(pin || crypto.randomUUID().replace(/\D/g, '').slice(0, 6).padEnd(6, '9'));
+      const pinHash = pin ? await hashSecretWeb(pin) : null;
       this.ctx.storage.sql.exec(
         'INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)',
         adminId,
         pwHash,
         pinHash,
-        new Date().toISOString()
+        provNow
       );
 
-      const { token, cookieHeader } = await this.issueSession(adminUser, workspaceId, adminUser.deviceName);
+      const session = await this.issueSession(adminUser, workspaceId, adminUser.deviceName, {
+        rememberMe: body.rememberMe !== false,
+        appType,
+        secure: secureReq,
+      });
+      const userState = this.getStateForUser(fresh, adminUser.id, workspaceId);
       return jsonResponse(
         {
           ok: true,
           workspaceId,
           authenticated: true,
-          user: adminUser,
-          token,
-          state: this.getStateForUser(fresh, adminUser.id),
+          user: sanitizeUserForClient(adminUser),
+          token: session.token,
+          ...(appType === 'desktop' && session.refreshToken ? { refreshToken: session.refreshToken } : {}),
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
+          landingNav: getRecommendedLandingNav(userState, adminUser),
+          allowedNavs: getAllowedNavsForUser(userState, adminUser),
+          state: userState,
         },
         201,
-        { 'Set-Cookie': cookieHeader }
+        session.headers
       );
     }
 
@@ -1428,7 +2335,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       };
       const loginProfiles = demoLoginEnabled
         ? state.users
-            .filter((u) => u.active)
+            .filter((u) => isUserAccountActive(u))
             .map((u) => ({
               id: u.id,
               nameAr: u.nameAr,
@@ -1443,17 +2350,23 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         return jsonResponse({
           authenticated: false,
           workspaceId,
+          workspaceExists: state.users.length > 0 || workspaceId === 'default',
           demoLoginEnabled,
           loginProfiles,
           companyBranding,
         });
       }
       const user = state.users.find((u) => u.id === actor.userId);
+      const userState = this.getStateForUser(state, actor.userId, workspaceId);
       return jsonResponse({
         authenticated: true,
         workspaceId,
-        user,
+        workspaceExists: true,
+        user: user ? sanitizeUserForClient(user) : undefined,
         token: actor.rawToken,
+        sessionId: actor.sessionId,
+        landingNav: getRecommendedLandingNav(userState, user),
+        allowedNavs: getAllowedNavsForUser(userState, user),
         demoLoginEnabled,
         loginProfiles,
         companyBranding,
@@ -1464,15 +2377,28 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       const body = (await request.json().catch(() => ({}))) as Record<string, any>;
       const identifier = String(body.identifier || body.email || body.userId || '').trim().toLowerCase();
       const password = String(body.password || '');
+      const appType: 'web' | 'desktop' = body.appType === 'desktop' ? 'desktop' : 'web';
+      const rememberMe = body.rememberMe !== false;
       const phoneNeedle = normalizePhone(identifier);
       const user = state.users.find(
         (u) =>
-          u.active &&
-          (u.id.toLowerCase() === identifier ||
-            u.email.toLowerCase() === identifier ||
-            (phoneNeedle.length >= 6 && normalizePhone(u.phone) === phoneNeedle))
+          u.id.toLowerCase() === identifier ||
+          u.email.toLowerCase() === identifier ||
+          (u.username && u.username.toLowerCase() === identifier) ||
+          (phoneNeedle.length >= 6 && normalizePhone(u.phone) === phoneNeedle)
       );
-      if (!user) return jsonResponse({ error: 'بيانات الدخول غير صحيحة' }, 401);
+      if (!user) {
+        this.recordDeniedAccess(state, workspaceId, undefined, 'فشل تسجيل الدخول', 'AuthLogin', identifier || 'unknown', 'محاولة دخول ببريد/معرف غير مسجل', {
+          deviceName: String(body.deviceName || 'Web Terminal'),
+        });
+        return jsonResponse({ error: 'بيانات الدخول غير صحيحة' }, 401);
+      }
+      if (!isUserAccountActive(user)) {
+        this.recordDeniedAccess(state, workspaceId, user, 'رفض دخول حساب غير نشط', 'AuthLogin', user.id, `محاولة دخول لحساب بحالة ${user.accountStatus || 'موقوف'}`, {
+          deviceName: String(body.deviceName || 'Web Terminal'),
+        });
+        return jsonResponse({ error: 'تم إيقاف هذا الحساب أو لم يتم تفعيله بعد' }, 401);
+      }
 
       const lockStatus = this.checkAccountLock(user.id);
       if (lockStatus.locked) {
@@ -1485,16 +2411,37 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       const cred = this.ctx.storage.sql
         .exec<{ password_hash: string }>('SELECT password_hash FROM user_credentials WHERE user_id = ?', user.id)
         .toArray()[0];
-      if (!cred || !(await verifySecretWeb(password, cred.password_hash))) {
+      if (!cred || !cred.password_hash || !(await verifySecretWeb(password, cred.password_hash))) {
         this.recordFailedAttempt(user.id);
+        this.recordDeniedAccess(state, workspaceId, user, 'فشل تحقق كلمة المرور', 'AuthLogin', user.id, 'محاولة دخول بكلمة مرور خاطئة', {
+          deviceName: String(body.deviceName || 'Web Terminal'),
+        });
         return jsonResponse({ error: 'بيانات الدخول غير صحيحة' }, 401);
       }
       this.clearFailedAttempts(user.id);
-      const { token, cookieHeader } = await this.issueSession(user, workspaceId, String(body.deviceName || 'Web Terminal'));
+      const session = await this.issueSession(user, workspaceId, String(body.deviceName || 'Web Terminal'), {
+        rememberMe,
+        appType,
+        secure: secureReq,
+      });
+      const userState = this.getStateForUser(state, user.id, workspaceId);
       return jsonResponse(
-        { authenticated: true, workspaceId, user, token, state: this.getStateForUser(state, user.id) },
+        {
+          authenticated: true,
+          workspaceId,
+          user: sanitizeUserForClient(user),
+          token: session.token,
+          ...(appType === 'desktop' && session.refreshToken ? { refreshToken: session.refreshToken } : {}),
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
+          rememberMe: session.rememberMe,
+          landingNav: getRecommendedLandingNav(userState, user),
+          allowedNavs: getAllowedNavsForUser(userState, user),
+          state: userState,
+        },
         200,
-        { 'Set-Cookie': cookieHeader }
+        session.headers
       );
     }
 
@@ -1502,10 +2449,15 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       const body = (await request.json().catch(() => ({}))) as Record<string, any>;
       const identifier = String(body.userId || body.identifier || '').trim().toLowerCase();
       const pin = String(body.pin || '').trim();
+      const appType: 'web' | 'desktop' = body.appType === 'desktop' ? 'desktop' : 'web';
+      const rememberMe = body.rememberMe !== false;
       const user = state.users.find(
-        (u) => u.active && (u.id.toLowerCase() === identifier || u.email.toLowerCase() === identifier)
+        (u) => u.id.toLowerCase() === identifier || u.email.toLowerCase() === identifier
       );
-      if (!user) return jsonResponse({ error: 'الحساب غير موجود' }, 401);
+      if (!user || !isUserAccountActive(user)) {
+        this.recordDeniedAccess(state, workspaceId, user, 'فشل دخول PIN', 'AuthPin', identifier || 'unknown', 'محاولة دخول برمز PIN لحساب غير متاح');
+        return jsonResponse({ error: 'بيانات الدخول أو رمز PIN غير صحيحة' }, 401);
+      }
 
       const lockStatus = this.checkAccountLock(user.id);
       if (lockStatus.locked) {
@@ -1516,18 +2468,127 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       }
 
       const cred = this.ctx.storage.sql
-        .exec<{ pin_hash: string }>('SELECT pin_hash FROM user_credentials WHERE user_id = ?', user.id)
+        .exec<{ pin_hash: string | null }>('SELECT pin_hash FROM user_credentials WHERE user_id = ?', user.id)
         .toArray()[0];
-      if (!cred || !(await verifySecretWeb(pin, cred.pin_hash))) {
+      if (!cred?.pin_hash || !(await verifySecretWeb(pin, cred.pin_hash))) {
         this.recordFailedAttempt(user.id);
+        this.recordDeniedAccess(state, workspaceId, user, 'فشل تحقق PIN', 'AuthPin', user.id, 'محاولة دخول برمز PIN غير صحيح');
         return jsonResponse({ error: 'رمز PIN غير صحيح' }, 401);
       }
       this.clearFailedAttempts(user.id);
-      const { token, cookieHeader } = await this.issueSession(user, workspaceId, String(body.deviceName || 'Web Terminal'));
+      const session = await this.issueSession(user, workspaceId, String(body.deviceName || 'Web Terminal'), {
+        rememberMe,
+        appType,
+        secure: secureReq,
+      });
+      const userState = this.getStateForUser(state, user.id, workspaceId);
       return jsonResponse(
-        { authenticated: true, workspaceId, user, token, state: this.getStateForUser(state, user.id) },
+        {
+          authenticated: true,
+          workspaceId,
+          user: sanitizeUserForClient(user),
+          token: session.token,
+          ...(appType === 'desktop' && session.refreshToken ? { refreshToken: session.refreshToken } : {}),
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
+          rememberMe: session.rememberMe,
+          landingNav: getRecommendedLandingNav(userState, user),
+          allowedNavs: getAllowedNavsForUser(userState, user),
+          state: userState,
+        },
         200,
-        { 'Set-Cookie': cookieHeader }
+        session.headers
+      );
+    }
+
+    if (pathname === '/api/auth/refresh' && request.method === 'POST') {
+      const body = (await request.json().catch(() => ({}))) as Record<string, any>;
+      const cookies = parseCookies(request.headers.get('cookie'));
+      const cookieRefresh = (cookies[REFRESH_COOKIE_NAME] || '').trim();
+      const bodyRefresh = body?.refreshToken ? String(body.refreshToken).trim() : '';
+      const rawRefresh = cookieRefresh || bodyRefresh;
+      if (!rawRefresh) {
+        return jsonResponse({ error: 'رمز تجديد الجلسة غير موجود', code: 'AUTH_REQUIRED' }, 401);
+      }
+      const refHash = await sha256HexWeb(rawRefresh);
+      const dbSession = this.ctx.storage.sql
+        .exec<{
+          token_id: string;
+          user_id: string;
+          workspace_id: string;
+          device_name: string;
+          app_type: string;
+          remember_me: number;
+          refresh_expires_at: string | null;
+          revoked: number;
+        }>(
+          'SELECT token_id, user_id, workspace_id, device_name, app_type, remember_me, refresh_expires_at, revoked FROM sessions WHERE refresh_token_hash = ?',
+          refHash
+        )
+        .toArray()[0];
+
+      if (
+        !dbSession ||
+        dbSession.revoked !== 0 ||
+        dbSession.workspace_id !== workspaceId ||
+        (dbSession.refresh_expires_at && new Date(dbSession.refresh_expires_at).getTime() <= Date.now())
+      ) {
+        return jsonResponse({ error: 'انتهت صلاحية الجلسة — يرجى تسجيل الدخول مجدداً', code: 'AUTH_REQUIRED' }, 401);
+      }
+      if (dbSession.app_type !== 'desktop' && !cookieRefresh) {
+        this.recordDeniedAccess(state, workspaceId, undefined, 'رفض تجديد جلسة ويب عبر body', 'SessionSecurity', dbSession.token_id, 'محاولة استخدام refreshToken في body لجلسة ويب');
+        return jsonResponse({ error: 'تجديد جلسة الويب يتطلب ملف تعريف الجلسة الآمن فقط', code: 'AUTH_REQUIRED' }, 401);
+      }
+
+      const user = state.users.find((u) => u.id === dbSession.user_id && isUserAccountActive(u));
+      if (!user) {
+        this.revokeUserSessions(dbSession.user_id, workspaceId, 'تم إيقاف الحساب');
+        return jsonResponse({ error: 'تم إيقاف الحساب أو انتهت عضويته', code: 'AUTH_REQUIRED' }, 401);
+      }
+
+      const rememberMe = dbSession.remember_me !== 0;
+      const isDesktop = dbSession.app_type === 'desktop';
+      const now = Date.now();
+      const accessTtlMs = rememberMe ? ACCESS_TOKEN_TTL_MS : SESSION_SHORT_TTL_MS;
+      const exp = now + accessTtlMs;
+      const newExpiresAt = new Date(exp).toISOString();
+      const newRefreshExpiresAt = new Date(now + SESSION_TTL_MS).toISOString();
+      const newRefreshToken = randomHexWeb(32);
+      const newRefHash = await sha256HexWeb(newRefreshToken);
+      const newAccessToken = await signTokenWeb(
+        { sid: dbSession.token_id, uid: user.id, wid: workspaceId, role: user.role, deviceName: dbSession.device_name, iat: now, exp },
+        this.sessionSecretCache!
+      );
+
+      this.ctx.storage.sql.exec(
+        'UPDATE sessions SET refresh_token_hash = ?, expires_at = ?, refresh_expires_at = ? WHERE token_id = ? AND refresh_token_hash = ? AND revoked = 0',
+        newRefHash,
+        newExpiresAt,
+        newRefreshExpiresAt,
+        dbSession.token_id,
+        refHash
+      );
+
+      const headers = this.buildSessionHeaders(newAccessToken, newRefreshToken, rememberMe, accessTtlMs, secureReq);
+      const userState = this.getStateForUser(state, user.id, workspaceId);
+      return jsonResponse(
+        {
+          ok: true,
+          authenticated: true,
+          workspaceId,
+          token: newAccessToken,
+          ...(isDesktop ? { refreshToken: newRefreshToken } : {}),
+          expiresAt: newExpiresAt,
+          refreshExpiresAt: newRefreshExpiresAt,
+          rememberMe,
+          user: sanitizeUserForClient(user),
+          landingNav: getRecommendedLandingNav(userState, user),
+          allowedNavs: getAllowedNavsForUser(userState, user),
+          state: userState,
+        },
+        200,
+        headers
       );
     }
 
@@ -1539,9 +2600,10 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
           this.ctx.storage.sql.exec('UPDATE sessions SET revoked = 1 WHERE token_id = ?', claims.sid);
         }
       }
-      return jsonResponse({ ok: true }, 200, {
-        'Set-Cookie': `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
-      });
+      const headers = new Headers();
+      headers.append('Set-Cookie', `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      headers.append('Set-Cookie', `${REFRESH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      return jsonResponse({ ok: true }, 200, headers);
     }
 
     if (pathname === '/api/public/prospect-context' && request.method === 'GET') {
@@ -1592,6 +2654,15 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         : null;
 
     if (!PUBLIC_PATHS.has(pathname) && !pathname.startsWith('/api/public/lead-decision/') && !actor) {
+      this.recordDeniedAccess(
+        state,
+        workspaceId,
+        undefined,
+        'رفض وصول غير مصرح به (401)',
+        'SecurityAuth',
+        pathname,
+        `محاولة وصول مرفوضة (${request.method} ${pathname}) بدون جلسة صالحة`
+      );
       return jsonResponse(
         { error: 'انتهت الجلسة أو لم يتم تسجيل الدخول — يرجى المصادقة للمتابعة', code: 'AUTH_REQUIRED' },
         401
@@ -1600,115 +2671,161 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
 
     const verifiedActor = actor!;
 
+    if (pathname === '/api/auth/logout-all' && request.method === 'POST') {
+      const revokedCount = this.revokeUserSessions(
+        verifiedActor.userId,
+        workspaceId,
+        'تم تسجيل الخروج من جميع الأجهزة بناءً على طلبك'
+      );
+      const headers = new Headers();
+      headers.append('Set-Cookie', `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      headers.append('Set-Cookie', `${REFRESH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      return jsonResponse({ ok: true, revokedCount }, 200, headers);
+    }
+
+    if (pathname === '/api/auth/me' && request.method === 'GET') {
+      const user = state.users.find((u) => u.id === verifiedActor.userId);
+      const userState = this.getStateForUser(state, verifiedActor.userId, workspaceId);
+      return jsonResponse({
+        authenticated: true,
+        user: user ? sanitizeUserForClient(user) : undefined,
+        sessionId: verifiedActor.sessionId,
+        allowedNavs: getAllowedNavsForUser(userState, user),
+        landingNav: getRecommendedLandingNav(userState, user),
+      });
+    }
+
     if (pathname === '/api/state' && request.method === 'GET') {
       return jsonResponse({
-        state: this.getStateForUser(state, verifiedActor.userId),
+        state: this.getStateForUser(state, verifiedActor.userId, workspaceId),
         presence: this.getPresenceList(state),
         workspaceId,
       });
     }
 
     if (pathname === '/api/auth/credentials' && request.method === 'POST') {
-      const body = (await request.json().catch(() => ({}))) as Record<string, any>;
-      const targetUserId = String(body.targetUserId || verifiedActor.userId);
-      if (targetUserId !== verifiedActor.userId) {
-        this.assertPermission(state, verifiedActor.userId, 'manage_users');
+      try {
+        const body = (await request.json().catch(() => ({}))) as Record<string, any>;
+        const targetUserId = String(body.targetUserId || verifiedActor.userId);
+        const actorUser = this.getActingUser(state, verifiedActor.userId);
+        const isSelf = targetUserId === actorUser.id;
+        if (!isSelf && actorUser.role !== 'sys_owner') {
+          this.recordDeniedAccess(state, workspaceId, actorUser, 'رفض تعديل بيانات دخول موظف', 'StaffCredentials', targetUserId, 'تعديل بيانات دخول موظف آخر حصري لمالك النظام', { deviceName: verifiedActor.deviceName });
+          throw new WorkerPermissionDeniedError('تعديل بيانات دخول موظف آخر حصري لمالك النظام');
+        }
+        const now = new Date().toISOString();
+        const row = this.ctx.storage.sql
+          .exec<{ password_hash: string; pin_hash: string | null }>(
+            'SELECT password_hash, pin_hash FROM user_credentials WHERE user_id = ?',
+            targetUserId
+          )
+          .toArray()[0];
+
+        if (isSelf && body.newPassword) {
+          if (!body.currentPassword || !row?.password_hash || !(await verifySecretWeb(String(body.currentPassword), row.password_hash))) {
+            return jsonResponse({ error: 'كلمة المرور الحالية غير صحيحة' }, 400);
+          }
+        }
+        let pwHash = row?.password_hash || (await hashSecretWeb(randomHexWeb(18)));
+        let pinHash = row?.pin_hash ?? null;
+        if (body.newPassword) {
+          if (String(body.newPassword).length < 8) {
+            return jsonResponse({ error: 'كلمة المرور الجديدة يجب أن لا تقل عن 8 أحرف' }, 400);
+          }
+          pwHash = await hashSecretWeb(String(body.newPassword));
+        }
+        if (body.newPin) {
+          if (!/^\d{4,6}$/.test(String(body.newPin))) {
+            return jsonResponse({ error: 'رمز PIN الجديد يجب أن يتكون من 4 إلى 6 أرقام' }, 400);
+          }
+          pinHash = await hashSecretWeb(String(body.newPin));
+        }
+        this.ctx.storage.sql.exec(
+          'INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)',
+          targetUserId,
+          pwHash,
+          pinHash,
+          now
+        );
+        if (body.newPassword || body.newPin) {
+          this.revokeUserSessions(
+            targetUserId,
+            workspaceId,
+            isSelf ? 'تم تحديث بيانات الدخول — تم إنهاء الجلسات الأخرى' : 'تمت إعادة تعيين بيانات الدخول بواسطة مالك النظام',
+            isSelf ? verifiedActor.sessionId : undefined
+          );
+        }
+        this.appendAudit(state, verifiedActor.userId, 'تحديث بيانات الدخول', 'أمان المستخدمين', targetUserId, isSelf ? 'تحديث كلمة المرور أو PIN الشخصي' : `إعادة تعيين بيانات ${targetUserId}`, verifiedActor.deviceName);
+        this.persistState(state, workspaceId);
+        return jsonResponse({ ok: true, state: this.getStateForUser(state, verifiedActor.userId, workspaceId) });
+      } catch (err) {
+        return errorResponse(err, 400);
       }
-      const now = new Date().toISOString();
-      const row = this.ctx.storage.sql
-        .exec<{ password_hash: string; pin_hash: string }>(
-          'SELECT password_hash, pin_hash FROM user_credentials WHERE user_id = ?',
-          targetUserId
-        )
-        .toArray()[0];
-      let pwHash = row?.password_hash || (await hashSecretWeb('Aqar@2026'));
-      let pinHash = row?.pin_hash || (await hashSecretWeb('1234'));
-      if (body.newPassword && String(body.newPassword).length >= 6) {
-        pwHash = await hashSecretWeb(String(body.newPassword));
-      }
-      if (body.newPin && /^\d{4,6}$/.test(String(body.newPin))) {
-        pinHash = await hashSecretWeb(String(body.newPin));
-      }
-      this.ctx.storage.sql.exec(
-        'INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)',
-        targetUserId,
-        pwHash,
-        pinHash,
-        now
-      );
-      return jsonResponse({ ok: true, state: this.getStateForUser(state, verifiedActor.userId) });
     }
 
     // Encrypted Backup Endpoints on Durable Object SQLite
     if (pathname === '/api/backups' && request.method === 'POST') {
-      this.assertPermission(state, verifiedActor.userId, 'backup_restore');
-      const body = (await request.json().catch(() => ({}))) as Record<string, any>;
-      const snapshotData = JSON.parse(JSON.stringify(state)) as AqarDatabaseState;
-      const encryptPassword = body.encryptPassword ? String(body.encryptPassword) : undefined;
-      const encrypted = Boolean(encryptPassword && encryptPassword.trim().length > 0);
-      const id = uid('bkp');
-      const payloadToStore = encrypted
-        ? await encryptBackupWeb(snapshotData, encryptPassword!)
-        : snapshotData;
-      const rawPayload = JSON.stringify(payloadToStore);
-      const bkpMeta: BackupSnapshot = {
-        id,
-        label: String(body.label || `نسخة سحابية · ${new Date().toLocaleDateString('ar-SA')}`),
-        createdAt: new Date().toISOString(),
-        createdBy: verifiedActor.userId,
-        sizeKb: Math.max(1, Math.round(rawPayload.length / 1024)),
-        recordCount:
-          state.properties.length +
-          state.units.length +
-          state.tenants.length +
-          state.contracts.length +
-          state.payments.length,
-        encrypted,
-      };
-      this.ctx.storage.sql.exec(
-        'INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)',
-        id,
-        rawPayload,
-        bkpMeta.createdAt
-      );
-      state.backups.unshift(bkpMeta);
-      this.persistState(state, workspaceId);
-      return jsonResponse({ backup: bkpMeta, state: this.getStateForUser(state, verifiedActor.userId) }, 201);
+      try {
+        this.assertPermission(state, workspaceId, verifiedActor.userId, 'backup_restore', {
+          entityType: 'Backup',
+          deviceName: verifiedActor.deviceName,
+        });
+        const body = (await request.json().catch(() => ({}))) as Record<string, any>;
+        const snapshotData = JSON.parse(JSON.stringify(state)) as AqarDatabaseState;
+        const encryptPassword = body.encryptPassword ? String(body.encryptPassword) : undefined;
+        const encrypted = Boolean(encryptPassword && encryptPassword.trim().length > 0);
+        const id = uid('bkp');
+        const payloadToStore = encrypted
+          ? await encryptBackupWeb(snapshotData, encryptPassword!)
+          : snapshotData;
+        const rawPayload = JSON.stringify(payloadToStore);
+        const bkpMeta: BackupSnapshot = {
+          id,
+          label: String(body.label || `نسخة سحابية · ${new Date().toLocaleDateString('ar-SA')}`),
+          createdAt: new Date().toISOString(),
+          createdBy: verifiedActor.userId,
+          sizeKb: Math.max(1, Math.round(rawPayload.length / 1024)),
+          recordCount:
+            state.properties.length +
+            state.units.length +
+            state.tenants.length +
+            state.contracts.length +
+            state.payments.length,
+          encrypted,
+        };
+        this.ctx.storage.sql.exec(
+          'INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)',
+          id,
+          rawPayload,
+          bkpMeta.createdAt
+        );
+        state.backups.unshift(bkpMeta);
+        this.persistState(state, workspaceId);
+        return jsonResponse({ backup: bkpMeta, state: this.getStateForUser(state, verifiedActor.userId, workspaceId) }, 201);
+      } catch (err) {
+        return errorResponse(err, 400);
+      }
     }
 
     const bkpPreviewMatch = /^\/api\/backups\/([^/]+)\/preview$/.exec(pathname);
     if (bkpPreviewMatch && (request.method === 'POST' || request.method === 'GET')) {
-      this.assertPermission(state, verifiedActor.userId, 'backup_restore');
-      const bkpId = bkpPreviewMatch[1];
-      const meta = state.backups.find((b) => b.id === bkpId);
-      const row = this.ctx.storage.sql
-        .exec<{ payload_json: string }>('SELECT payload_json FROM backups_store WHERE id = ?', bkpId)
-        .toArray()[0];
-      if (!row) {
-        return jsonResponse({
-          id: bkpId,
-          label: meta?.label || '',
-          exists: false,
-          encrypted: Boolean(meta?.encrypted),
-          propertiesCount: 0,
-          unitsCount: 0,
-          tenantsCount: 0,
-          contractsCount: 0,
-          paymentsCount: 0,
-          templatesCount: 0,
+      try {
+        this.assertPermission(state, workspaceId, verifiedActor.userId, 'backup_restore', {
+          entityType: 'Backup',
+          entityId: bkpPreviewMatch[1],
+          deviceName: verifiedActor.deviceName,
         });
-      }
-      const parsed = JSON.parse(row.payload_json) as AqarDatabaseState | WebEncryptedEnvelope;
-      let snap: AqarDatabaseState;
-      if ('aqarEncrypted' in parsed && parsed.aqarEncrypted) {
-        const body = request.method === 'POST' ? ((await request.json().catch(() => ({}))) as Record<string, any>) : {};
-        const password = body.password ? String(body.password) : url.searchParams.get('password') || '';
-        if (!password) {
+        const bkpId = bkpPreviewMatch[1];
+        const meta = state.backups.find((b) => b.id === bkpId);
+        const row = this.ctx.storage.sql
+          .exec<{ payload_json: string }>('SELECT payload_json FROM backups_store WHERE id = ?', bkpId)
+          .toArray()[0];
+        if (!row) {
           return jsonResponse({
             id: bkpId,
-            exists: true,
-            encrypted: true,
-            requiresPassword: true,
+            label: meta?.label || '',
+            exists: false,
+            encrypted: Boolean(meta?.encrypted),
             propertiesCount: 0,
             unitsCount: 0,
             tenantsCount: 0,
@@ -1717,119 +2834,154 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
             templatesCount: 0,
           });
         }
-        try {
-          snap = await decryptBackupWeb<AqarDatabaseState>(parsed, password);
-        } catch {
-          return jsonResponse({
-            id: bkpId,
-            exists: true,
-            encrypted: true,
-            requiresPassword: true,
-            decryptionError: 'كلمة مرور فك التشفير غير صحيحة',
-            propertiesCount: 0,
-            unitsCount: 0,
-            tenantsCount: 0,
-            contractsCount: 0,
-            paymentsCount: 0,
-            templatesCount: 0,
-          });
+        const parsed = JSON.parse(row.payload_json) as AqarDatabaseState | WebEncryptedEnvelope;
+        let snap: AqarDatabaseState;
+        if ('aqarEncrypted' in parsed && parsed.aqarEncrypted) {
+          const body = request.method === 'POST' ? ((await request.json().catch(() => ({}))) as Record<string, any>) : {};
+          const password = body.password ? String(body.password) : url.searchParams.get('password') || '';
+          if (!password) {
+            return jsonResponse({
+              id: bkpId,
+              exists: true,
+              encrypted: true,
+              requiresPassword: true,
+              propertiesCount: 0,
+              unitsCount: 0,
+              tenantsCount: 0,
+              contractsCount: 0,
+              paymentsCount: 0,
+              templatesCount: 0,
+            });
+          }
+          try {
+            snap = await decryptBackupWeb<AqarDatabaseState>(parsed, password);
+          } catch {
+            return jsonResponse({
+              id: bkpId,
+              exists: true,
+              encrypted: true,
+              requiresPassword: true,
+              decryptionError: 'كلمة مرور فك التشفير غير صحيحة',
+              propertiesCount: 0,
+              unitsCount: 0,
+              tenantsCount: 0,
+              contractsCount: 0,
+              paymentsCount: 0,
+              templatesCount: 0,
+            });
+          }
+        } else {
+          snap = parsed as AqarDatabaseState;
         }
-      } else {
-        snap = parsed as AqarDatabaseState;
+
+        const diffCollection = <T extends { id: string }>(cur: T[] = [], inc: T[] = []): BackupCollectionDiff => {
+          const curMap = new Map(cur.map((x) => [x.id, JSON.stringify(x)]));
+          let added = 0;
+          let updated = 0;
+          let unchanged = 0;
+          for (const item of inc) {
+            const ex = curMap.get(item.id);
+            if (!ex) added += 1;
+            else if (ex === JSON.stringify(item)) unchanged += 1;
+            else updated += 1;
+          }
+          return { added, updated, unchanged };
+        };
+
+        const diff = {
+          properties: diffCollection(state.properties, snap.properties),
+          units: diffCollection(state.units, snap.units),
+          tenants: diffCollection(state.tenants, snap.tenants),
+          contracts: diffCollection(state.contracts, snap.contracts),
+          payments: diffCollection(state.payments, snap.payments),
+          expenses: diffCollection(state.expenses, snap.expenses),
+          tickets: diffCollection(state.tickets, snap.tickets),
+        };
+        const totalChanged = Object.values(diff).reduce((s, d) => s + d.added + d.updated, 0);
+
+        const preview: BackupPreviewResult = {
+          id: bkpId,
+          exists: true,
+          encrypted: 'aqarEncrypted' in parsed,
+          propertiesCount: snap.properties?.length || 0,
+          unitsCount: snap.units?.length || 0,
+          tenantsCount: snap.tenants?.length || 0,
+          contractsCount: snap.contracts?.length || 0,
+          paymentsCount: snap.payments?.length || 0,
+          templatesCount: snap.communicationTemplates?.length || 0,
+          lastUpdatedAt: snap.lastUpdatedAt,
+          diff: { ...diff, totalChanged },
+        };
+        return jsonResponse(preview);
+      } catch (err) {
+        return errorResponse(err, 400);
       }
-
-      const diffCollection = <T extends { id: string }>(cur: T[] = [], inc: T[] = []): BackupCollectionDiff => {
-        const curMap = new Map(cur.map((x) => [x.id, JSON.stringify(x)]));
-        let added = 0;
-        let updated = 0;
-        let unchanged = 0;
-        for (const item of inc) {
-          const ex = curMap.get(item.id);
-          if (!ex) added += 1;
-          else if (ex === JSON.stringify(item)) unchanged += 1;
-          else updated += 1;
-        }
-        return { added, updated, unchanged };
-      };
-
-      const diff = {
-        properties: diffCollection(state.properties, snap.properties),
-        units: diffCollection(state.units, snap.units),
-        tenants: diffCollection(state.tenants, snap.tenants),
-        contracts: diffCollection(state.contracts, snap.contracts),
-        payments: diffCollection(state.payments, snap.payments),
-        expenses: diffCollection(state.expenses, snap.expenses),
-        tickets: diffCollection(state.tickets, snap.tickets),
-      };
-      const totalChanged = Object.values(diff).reduce((s, d) => s + d.added + d.updated, 0);
-
-      const preview: BackupPreviewResult = {
-        id: bkpId,
-        exists: true,
-        encrypted: 'aqarEncrypted' in parsed,
-        propertiesCount: snap.properties?.length || 0,
-        unitsCount: snap.units?.length || 0,
-        tenantsCount: snap.tenants?.length || 0,
-        contractsCount: snap.contracts?.length || 0,
-        paymentsCount: snap.payments?.length || 0,
-        templatesCount: snap.communicationTemplates?.length || 0,
-        lastUpdatedAt: snap.lastUpdatedAt,
-        diff: { ...diff, totalChanged },
-      };
-      return jsonResponse(preview);
     }
 
     const bkpRestoreMatch = /^\/api\/backups\/([^/]+)\/restore$/.exec(pathname);
     if (bkpRestoreMatch && request.method === 'POST') {
-      this.assertPermission(state, verifiedActor.userId, 'backup_restore');
-      const bkpId = bkpRestoreMatch[1];
-      const body = (await request.json().catch(() => ({}))) as Record<string, any>;
-      const row = this.ctx.storage.sql
-        .exec<{ payload_json: string }>('SELECT payload_json FROM backups_store WHERE id = ?', bkpId)
-        .toArray()[0];
-      if (!row) return jsonResponse({ error: 'النسخة غير موجودة' }, 404);
-      const parsed = JSON.parse(row.payload_json) as AqarDatabaseState | WebEncryptedEnvelope;
-      let snap: AqarDatabaseState;
-      if ('aqarEncrypted' in parsed && parsed.aqarEncrypted) {
-        if (!body.password) return jsonResponse({ error: 'كلمة مرور فك التشفير مطلوبة' }, 400);
-        try {
-          snap = await decryptBackupWeb<AqarDatabaseState>(parsed, String(body.password));
-        } catch {
-          return jsonResponse({ error: 'كلمة مرور فك التشفير غير صحيحة' }, 400);
+      try {
+        this.assertPermission(state, workspaceId, verifiedActor.userId, 'backup_restore', {
+          entityType: 'Backup',
+          entityId: bkpRestoreMatch[1],
+          deviceName: verifiedActor.deviceName,
+        });
+        const bkpId = bkpRestoreMatch[1];
+        const body = (await request.json().catch(() => ({}))) as Record<string, any>;
+        const row = this.ctx.storage.sql
+          .exec<{ payload_json: string }>('SELECT payload_json FROM backups_store WHERE id = ?', bkpId)
+          .toArray()[0];
+        if (!row) return jsonResponse({ error: 'النسخة غير موجودة' }, 404);
+        const parsed = JSON.parse(row.payload_json) as AqarDatabaseState | WebEncryptedEnvelope;
+        let snap: AqarDatabaseState;
+        if ('aqarEncrypted' in parsed && parsed.aqarEncrypted) {
+          if (!body.password) return jsonResponse({ error: 'كلمة مرور فك التشفير مطلوبة' }, 400);
+          try {
+            snap = await decryptBackupWeb<AqarDatabaseState>(parsed, String(body.password));
+          } catch {
+            return jsonResponse({ error: 'كلمة مرور فك التشفير غير صحيحة' }, 400);
+          }
+        } else {
+          snap = parsed as AqarDatabaseState;
         }
-      } else {
-        snap = parsed as AqarDatabaseState;
+        const safetyId = uid('bkp-safety');
+        this.ctx.storage.sql.exec(
+          'INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)',
+          safetyId,
+          JSON.stringify(state),
+          new Date().toISOString()
+        );
+        const existingAudits = [...(state.auditLogs || [])];
+        if (body.mode === 'merge') {
+          const mergeById = <T extends { id: string }>(cur: T[] = [], inc: T[] = []) => {
+            const seen = new Set(cur.map((x) => x.id));
+            return [...cur, ...inc.filter((x) => !seen.has(x.id))];
+          };
+          state.properties = mergeById(state.properties, snap.properties);
+          state.units = mergeById(state.units, snap.units);
+          state.tenants = mergeById(state.tenants, snap.tenants);
+          state.contracts = mergeById(state.contracts, snap.contracts);
+          state.installments = mergeById(state.installments, snap.installments);
+          state.payments = mergeById(state.payments, snap.payments);
+          state.expenses = mergeById(state.expenses, snap.expenses);
+          state.tickets = mergeById(state.tickets, snap.tickets);
+          state.tasks = mergeById(state.tasks, snap.tasks);
+          state.documents = mergeById(state.documents, snap.documents);
+          state.auditLogs = mergeById(existingAudits, snap.auditLogs || []);
+        } else {
+          const preservedBackups = state.backups;
+          Object.assign(state, snap);
+          state.backups = preservedBackups;
+          const seenAudits = new Set(existingAudits.map((a) => a.id));
+          state.auditLogs = [...existingAudits, ...(snap.auditLogs || []).filter((a) => !seenAudits.has(a.id))];
+        }
+        this.appendAudit(state, verifiedActor.userId, 'استعادة نسخة احتياطية', 'نظام', bkpId, `استعادة (${body.mode || 'replace'}) مع الحفاظ على سجل التدقيق`, verifiedActor.deviceName);
+        this.persistState(state, workspaceId);
+        this.broadcastStateChange(state, verifiedActor.userId, 'استعادة نسخة احتياطية', workspaceId);
+        return jsonResponse({ ok: true, mode: body.mode || 'replace', state: this.getStateForUser(state, verifiedActor.userId, workspaceId) });
+      } catch (err) {
+        return errorResponse(err, 400);
       }
-      const safetyId = uid('bkp-safety');
-      this.ctx.storage.sql.exec(
-        'INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)',
-        safetyId,
-        JSON.stringify(state),
-        new Date().toISOString()
-      );
-      if (body.mode === 'merge') {
-        const mergeById = <T extends { id: string }>(cur: T[] = [], inc: T[] = []) => {
-          const seen = new Set(cur.map((x) => x.id));
-          return [...cur, ...inc.filter((x) => !seen.has(x.id))];
-        };
-        state.properties = mergeById(state.properties, snap.properties);
-        state.units = mergeById(state.units, snap.units);
-        state.tenants = mergeById(state.tenants, snap.tenants);
-        state.contracts = mergeById(state.contracts, snap.contracts);
-        state.installments = mergeById(state.installments, snap.installments);
-        state.payments = mergeById(state.payments, snap.payments);
-        state.expenses = mergeById(state.expenses, snap.expenses);
-        state.tickets = mergeById(state.tickets, snap.tickets);
-        state.tasks = mergeById(state.tasks, snap.tasks);
-        state.documents = mergeById(state.documents, snap.documents);
-      } else {
-        const preservedBackups = state.backups;
-        Object.assign(state, snap);
-        state.backups = preservedBackups;
-      }
-      this.persistState(state, workspaceId);
-      this.broadcastStateChange(state, verifiedActor.userId, 'استعادة نسخة احتياطية');
-      return jsonResponse({ ok: true, mode: body.mode || 'replace', state: this.getStateForUser(state, verifiedActor.userId) });
     }
 
     // Idempotent Offline Sync Batch Replay with operations_log + entityRevisions conflict check
@@ -1900,7 +3052,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
 
       if (conflictsDetected > 0) this.persistState(state, workspaceId);
       if (uploaded > 0) {
-        this.broadcastStateChange(state, verifiedActor.userId, `مزامنة ${uploaded} عملية من العمل دون إنترنت`);
+        this.broadcastStateChange(state, verifiedActor.userId, `مزامنة ${uploaded} عملية من العمل دون إنترنت`, workspaceId);
       }
 
       return jsonResponse({
@@ -1910,7 +3062,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         conflictsDetected,
         newConflicts,
         errors,
-        state: this.getStateForUser(state, verifiedActor.userId),
+        state: this.getStateForUser(state, verifiedActor.userId, workspaceId),
         syncedAt: new Date().toISOString(),
       });
     }
@@ -1924,7 +3076,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         lastUpdatedAt: state.lastUpdatedAt,
         pendingConflictsCount: (state.syncConflicts || []).filter((c) => c.status === 'بانتظار مراجعة المدير').length,
         syncConflicts: state.syncConflicts || [],
-        state: hasChanges ? this.getStateForUser(state, verifiedActor.userId) : undefined,
+        state: hasChanges ? this.getStateForUser(state, verifiedActor.userId, workspaceId) : undefined,
       });
     }
 
@@ -1933,10 +3085,10 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
       try {
         const body = (await request.json().catch(() => ({}))) as Record<string, any>;
         const result = await this.handleMutation(state, verifiedActor, request.method, pathname, body);
-        this.broadcastStateChange(state, verifiedActor.userId, `تحديث ${pathname}`);
+        this.broadcastStateChange(state, verifiedActor.userId, `تحديث ${pathname}`, workspaceId);
         return jsonResponse(result, request.method === 'POST' ? 201 : 200);
       } catch (err) {
-        return jsonResponse({ error: (err as Error).message }, 400);
+        return errorResponse(err, 400);
       }
     }
 
@@ -1971,7 +3123,7 @@ export class AqarWorkspaceDO extends DurableObject<WorkerEnv> {
         ws.send(
           JSON.stringify({
             type: 'state:init',
-            state: this.getStateForUser(state, actor.userId),
+            state: this.getStateForUser(state, actor.userId, workspaceId),
             presence: this.getPresenceList(state),
           })
         );

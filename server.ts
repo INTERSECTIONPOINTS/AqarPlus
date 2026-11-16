@@ -308,6 +308,22 @@ function disconnectUserWebSockets(
   return closed;
 }
 
+function flushStoreRevokedSessions(
+  wsStore: AqarStore,
+  workspaceId: string,
+  reason = 'تم تحديث صلاحيات أو حالة الحساب — يرجى تسجيل الدخول مجدداً'
+): void {
+  const revokedIds = wsStore.consumeRevokedSessionUserIds();
+  for (const targetUserId of revokedIds) {
+    try {
+      wsStore.getPersistence().revokeOtherSessionsForUser(targetUserId);
+    } catch {
+      // ignore persistence errors during revocation sweep
+    }
+    disconnectUserWebSockets(targetUserId, workspaceId, reason);
+  }
+}
+
 function issueUserSession(
   res: Response,
   userId: string,
@@ -334,6 +350,7 @@ function issueUserSession(
   const refreshExpiresAt = rememberMe ? new Date(now + refreshTtlMs).toISOString() : undefined;
   const rawRefreshToken = rememberMe ? crypto.randomBytes(32).toString('hex') : undefined;
   const sid = `ses-${crypto.randomBytes(8).toString('hex')}`;
+  const isDesktop = opts?.appType === 'desktop';
   const token = signSessionToken(
     { sid, uid: userId, wid: workspaceId, role, deviceName, iat: now, exp },
     wsStore.getSessionSecret()
@@ -342,7 +359,7 @@ function issueUserSession(
     sessionId: sid,
     rememberMe,
     ipAddress,
-    appType: opts?.appType === 'desktop' ? 'desktop' : 'web',
+    appType: isDesktop ? 'desktop' : 'web',
     deviceId: opts?.deviceId,
     rawRefreshToken,
     refreshExpiresAt,
@@ -366,7 +383,14 @@ function issueUserSession(
   } else {
     res.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
   }
-  return { token, refreshToken: rawRefreshToken, expiresAt, refreshExpiresAt, sessionId: sid, rememberMe };
+  return {
+    token,
+    refreshToken: isDesktop ? rawRefreshToken : undefined,
+    expiresAt,
+    refreshExpiresAt,
+    sessionId: sid,
+    rememberMe,
+  };
 }
 
 function getPresenceList(workspaceId = workspaceAls.getStore()?.workspaceId || 'default') {
@@ -419,6 +443,7 @@ function broadcastStateChange(
 ) {
   const wsStore = getExistingWorkspaceStore(workspaceId);
   if (!wsStore) return;
+  flushStoreRevokedSessions(wsStore, workspaceId, eventSummary || 'تم تحديث صلاحيات أو حالة الحساب');
   for (const [client, session] of activeSessions.entries()) {
     if (session.authenticated && session.workspaceId === workspaceId && client.readyState === WebSocket.OPEN) {
       try {
@@ -581,22 +606,30 @@ function handleApi(app: express.Express) {
         deviceName,
       });
 
+      const appType: 'web' | 'desktop' = req.body?.appType === 'desktop' ? 'desktop' : 'web';
+      const deviceId = req.body?.deviceId ? String(req.body.deviceId) : undefined;
       return workspaceAls.run({ workspaceId, store: provisionedStore }, () => {
         const adminUser = provisionedStore.getState().users[0];
-        const { token, expiresAt } = issueUserSession(
+        const session = issueUserSession(
           res,
           adminUser.id,
           adminUser.role,
           deviceName,
-          workspaceId
+          workspaceId,
+          true,
+          extractClientIp(req),
+          { appType, deviceId, secureCookie: isSecureRequest(req) }
         );
         res.status(201).json({
           ok: true,
           workspaceId,
           authenticated: true,
           user: adminUser,
-          token,
-          expiresAt,
+          token: session.token,
+          ...(appType === 'desktop' && session.refreshToken ? { refreshToken: session.refreshToken } : {}),
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
           state: provisionedStore.getStateForUser(adminUser.id),
         });
       });
@@ -681,7 +714,7 @@ function handleApi(app: express.Express) {
       companyBranding,
       user,
       token: session.token,
-      refreshToken: session.refreshToken,
+      ...(opts.appType === 'desktop' && session.refreshToken ? { refreshToken: session.refreshToken } : {}),
       expiresAt: session.expiresAt,
       refreshExpiresAt: session.refreshExpiresAt,
       sessionId: session.sessionId,
@@ -1114,7 +1147,7 @@ function handleApi(app: express.Express) {
           },
           user,
           token: session.token,
-          refreshToken: session.refreshToken,
+          ...(appType === 'desktop' && session.refreshToken ? { refreshToken: session.refreshToken } : {}),
           expiresAt: session.expiresAt,
           refreshExpiresAt: session.refreshExpiresAt,
           sessionId: session.sessionId,
@@ -1162,7 +1195,9 @@ function handleApi(app: express.Express) {
     try {
       const workspaceId = workspaceAls.getStore()?.workspaceId || 'default';
       const cookies = parseCookies(req.headers['cookie']);
-      const rawRefreshToken = String(req.body?.refreshToken || cookies[REFRESH_COOKIE_NAME] || '').trim();
+      const cookieRefresh = (cookies[REFRESH_COOKIE_NAME] || '').trim();
+      const bodyRefresh = req.body?.refreshToken ? String(req.body.refreshToken).trim() : '';
+      const rawRefreshToken = cookieRefresh || bodyRefresh;
       if (!rawRefreshToken) {
         return res.status(401).json({ error: 'رمز تجديد الجلسة غير موجود', code: 'AUTH_REQUIRED' });
       }
@@ -1171,6 +1206,18 @@ function handleApi(app: express.Express) {
         res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
         res.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return res.status(401).json({ error: 'انتهت صلاحية الجلسة — يرجى تسجيل الدخول مجدداً', code: 'AUTH_REQUIRED' });
+      }
+      // For web sessions, refresh tokens must arrive exclusively via HttpOnly cookie
+      if (dbSession.appType !== 'desktop' && !cookieRefresh) {
+        store.recordSecurityAudit({
+          userId: dbSession.userId,
+          action: 'رفض تجديد جلسة ويب بدون ملف تعريف HttpOnly',
+          entityType: 'SessionSecurity',
+          entityId: dbSession.sessionId || dbSession.userId,
+          summary: 'رفض محاولة تجديد جلسة متصفح عبر body بدلاً من HttpOnly cookie',
+          ipAddress: extractClientIp(req),
+        });
+        return res.status(401).json({ error: 'تجديد جلسة الويب يتطلب ملف تعريف الجلسة الآمن فقط', code: 'AUTH_REQUIRED' });
       }
       const user = store.getState().users.find(
         (u) => u.id === dbSession.userId && u.active && (!u.accountStatus || u.accountStatus === 'نشط')
@@ -1215,12 +1262,13 @@ function handleApi(app: express.Express) {
         });
       }
       const userState = store.getStateForUser(user.id);
+      const isDesktop = dbSession.appType === 'desktop';
       return res.json({
         ok: true,
         authenticated: true,
         workspaceId,
         token: newAccessToken,
-        refreshToken: newRefreshToken,
+        ...(isDesktop ? { refreshToken: newRefreshToken } : {}),
         expiresAt: newExpiresAt,
         refreshExpiresAt: newRefreshExpiresAt,
         rememberMe: dbSession.rememberMe !== false,
@@ -1373,6 +1421,14 @@ function handleApi(app: express.Express) {
     }
     const actor = resolveSessionActor(req);
     if (!actor) {
+      store.recordSecurityAudit({
+        action: 'رفض وصول غير مصرح به (401)',
+        entityType: 'SecurityAuth',
+        entityId: fullPath,
+        summary: `محاولة وصول مرفوضة إلى ${req.method} ${fullPath} بدون جلسة صالحة`,
+        deviceName: typeof req.headers['x-device-name'] === 'string' ? req.headers['x-device-name'] : undefined,
+        ipAddress: extractClientIp(req),
+      });
       return res.status(401).json({
         error: 'انتهت الجلسة أو لم يتم تسجيل الدخول — يرجى المصادقة للمتابعة',
         code: 'AUTH_REQUIRED',
@@ -1425,14 +1481,31 @@ function handleApi(app: express.Express) {
         targetUserId,
         {
           currentPassword: req.body?.currentPassword,
+          currentPin: req.body?.currentPin,
           newPassword: req.body?.newPassword,
           newPin: req.body?.newPin,
         },
         actor.deviceName
       );
+      if (targetUserId !== actor.userId) {
+        flushStoreRevokedSessions(
+          store,
+          actor.workspaceId,
+          'تمت إعادة تعيين بيانات الدخول بواسطة مالك النظام — يرجى تسجيل الدخول مجدداً'
+        );
+      } else if (req.body?.newPassword || req.body?.newPin) {
+        store.getPersistence().revokeOtherSessionsForUser(actor.userId, actor.rawToken);
+        disconnectUserWebSockets(
+          actor.userId,
+          actor.workspaceId,
+          'تم تحديث بيانات الدخول — تم إنهاء الجلسات الأخرى لدواعي الأمان',
+          undefined,
+          actor.sessionId
+        );
+      }
       res.json({ ok: true, state: store.getStateForUser(actor.userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -1741,7 +1814,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث صلاحيات الدور ${req.body.role}`);
       res.json({ rolePermissions, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -1751,7 +1824,7 @@ function handleApi(app: express.Express) {
       store.markNotificationsRead(userId);
       res.json({ ok: true, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -1853,13 +1926,14 @@ function handleApi(app: express.Express) {
   app.post('/api/documents/ocr', async (req: Request, res: Response) => {
     try {
       const { userId, deviceName } = getActor(req);
+      store.assertModuleAction(userId, 'documents', 'create', { entityType: 'DocumentOCR', deviceName });
       const result = await extractDocumentDataWithGemini({
         dataUrl: String(req.body?.dataUrl || ''),
         mimeType: req.body?.mimeType ? String(req.body.mimeType) : undefined,
         fileName: req.body?.fileName ? String(req.body.fileName) : undefined,
         categoryHint: req.body?.categoryHint ? String(req.body.categoryHint) : undefined,
       });
-      const matches = store.findOcrEntityMatches(result.extracted);
+      const matches = store.findOcrEntityMatches(result.extracted, userId);
 
       if (req.body?.autoSync) {
         const synced = store.syncOcrToEntities(
@@ -1929,7 +2003,7 @@ function handleApi(app: express.Express) {
   app.post('/api/documents/:id/ocr', async (req: Request, res: Response) => {
     try {
       const { userId, deviceName } = getActor(req);
-      const docExisting = store.getState().documents.find((d) => d.id === String(req.params.id));
+      const docExisting = store.getAuthorizedDocument(userId, String(req.params.id), 'edit', deviceName);
       const dataUrl = String(req.body?.dataUrl || docExisting?.dataUrl || '');
       const result = await extractDocumentDataWithGemini({
         dataUrl,
@@ -1937,7 +2011,7 @@ function handleApi(app: express.Express) {
         categoryHint: docExisting?.category,
       });
       const doc = store.attachDocumentOcr(userId, String(req.params.id), result.extracted, result.rawText, deviceName);
-      const matches = store.findOcrEntityMatches(result.extracted);
+      const matches = store.findOcrEntityMatches(result.extracted, userId);
       let syncSummary;
       if (req.body?.autoSync !== false) {
         const synced = store.syncOcrToEntities(
@@ -1982,7 +2056,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تجديد العقد ${result.contract.internalNumber}`);
       res.status(201).json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -1993,7 +2067,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `إنشاء طلب شراء ${po.poNumber}`);
       res.status(201).json({ po, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2004,7 +2078,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث طلب شراء ${po.poNumber}`);
       res.json({ po, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2015,7 +2089,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `إصدار قرار إداري ${decision.decisionNumber}`);
       res.status(201).json({ decision, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2026,7 +2100,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث قائمة سياسة التسكين للمستأجر ${tenant.nameAr}`);
       res.json({ tenant, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2037,7 +2111,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `استيراد جماعي من Excel (${summary.inserted} سجل)`);
       res.status(201).json({ ...summary, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2048,7 +2122,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, 'تهيئة مساحة عمل نظيفة عبر الإعداد الأولي');
       res.json({ ok: true, state: fresh });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2060,7 +2134,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, result.summary);
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2071,6 +2145,9 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, result.restoredSummary);
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
+      if (e instanceof PermissionDeniedError) {
+        return sendApiError(res, e, 403);
+      }
       const msg = (e as Error).message || '';
       const isConflict = msg.startsWith('CONFLICT_ACTIVE_CONTRACT:');
       res.status(isConflict ? 409 : 400).json({ error: msg, conflict: isConflict });
@@ -2084,7 +2161,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, result.summary);
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2095,7 +2172,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `حفظ فلتر الأرشيف "${filter.name}"`);
       res.status(201).json({ filter, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2105,7 +2182,7 @@ function handleApi(app: express.Express) {
       store.deleteArchiveFilter(userId, String(req.params.id));
       res.json({ ok: true, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2353,12 +2430,12 @@ function handleApi(app: express.Express) {
         },
         actor.deviceName
       );
-      if (req.body?.newPassword) {
+      if (req.body?.newPassword || req.body?.newPin) {
         store.getPersistence().revokeOtherSessionsForUser(actor.userId, actor.rawToken);
         disconnectUserWebSockets(
           actor.userId,
           actor.workspaceId,
-          'تم تغيير كلمة المرور — تم إنهاء الجلسات الأخرى لدواعي الأمان',
+          'تم تغيير كلمة المرور أو رمز PIN — تم إنهاء الجلسات الأخرى لدواعي الأمان',
           undefined,
           actor.sessionId
         );
@@ -2432,7 +2509,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث سياسة الأمان وكلمات المرور`);
       res.json({ securityPolicy, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2447,24 +2524,48 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `معالجة تعارض مزامنة: ${conflict.entityLabel}`);
       res.json({ conflict, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
   app.post('/api/team/sessions/terminate', (req: Request, res: Response) => {
     try {
-      const { userId, deviceName, ipAddress } = getActor(req);
-      const state = store.getState();
-      const actor = state.users.find((u) => u.id === userId);
-      if (!actor || !(state.rolePermissions[actor.role] || []).includes('manage_users')) {
-        throw new Error('لا تملك صلاحية إنهاء الجلسات عن بُعد');
+      const { userId, deviceName, ipAddress, workspaceId } = getActor(req);
+      const actor = store.assertModuleAction(userId, 'team', 'manage', {
+        entityType: 'StaffSession',
+        deviceName,
+      });
+      if (actor.role !== 'sys_owner' && actor.role !== 'gm') {
+        const msg = 'إنهاء الجلسات عن بُعد حصري لمالك النظام أو مدير الشركة';
+        store.recordSecurityAudit({
+          userId: actor.id,
+          action: 'رفض إنهاء جلسات عن بُعد',
+          entityType: 'StaffSession',
+          entityId: String(req.body?.userId || req.body?.sessionId || 'session'),
+          summary: msg,
+          deviceName,
+          ipAddress,
+        });
+        throw new PermissionDeniedError(msg);
       }
+      const state = store.getState();
       const targetUserId = req.body.userId ? String(req.body.userId) : undefined;
       const targetSessionId = req.body.sessionId ? String(req.body.sessionId) : undefined;
+      if (targetUserId) {
+        const targetUser = state.users.find((u) => u.id === targetUserId);
+        if (!targetUser) throw new Error('المستخدم المستهدف غير موجود');
+        if (actor.role === 'gm' && (targetUser.role === 'sys_owner' || targetUser.role === 'gm')) {
+          throw new PermissionDeniedError('لا يملك مدير الشركة صلاحية إنهاء جلسات مالك النظام أو مدير شركة');
+        }
+        if (actor.role === 'gm' && actor.companyId && targetUser.companyId && actor.companyId !== targetUser.companyId) {
+          throw new PermissionDeniedError('لا يمكن إنهاء جلسات موظف يتبع شركة أخرى');
+        }
+      }
       const reason = String(req.body.reason || 'إنهاء جلسة إداري عن بُعد');
 
       let terminatedCount = 0;
       for (const [client, session] of Array.from(activeSessions.entries())) {
+        if (session.workspaceId !== workspaceId) continue;
         const matchesSession = targetSessionId && session.sessionId === targetSessionId;
         const matchesUser = !targetSessionId && targetUserId && session.userId === targetUserId;
         if (matchesSession || matchesUser) {
@@ -2489,6 +2590,12 @@ function handleApi(app: express.Express) {
         }
       }
 
+      if (targetUserId && !targetSessionId) {
+        store.getPersistence().revokeOtherSessionsForUser(targetUserId);
+      } else if (targetUserId && targetSessionId) {
+        store.getPersistence().revokeSessionById(targetUserId, targetSessionId);
+      }
+
       if (targetUserId) {
         store.recordLoginEvent({
           userId: targetUserId,
@@ -2498,27 +2605,41 @@ function handleApi(app: express.Express) {
           success: true,
         });
       }
+      store.recordSecurityAudit({
+        userId: actor.id,
+        action: 'إنهاء جلسات عن بُعد',
+        entityType: 'StaffSession',
+        entityId: targetSessionId || targetUserId || 'all',
+        summary: `إنهاء ${terminatedCount} جلسة نشطة عن بُعد (${reason})`,
+        deviceName,
+        ipAddress,
+      });
 
-      broadcastPresence();
-      broadcastStateChange(userId, `إنهاء ${terminatedCount} جلسة نشطة عن بُعد`);
+      broadcastPresence(workspaceId);
+      broadcastStateChange(userId, `إنهاء ${terminatedCount} جلسة نشطة عن بُعد`, workspaceId);
       res.json({
         ok: true,
         terminatedCount,
-        presence: getPresenceList(),
+        presence: getPresenceList(workspaceId),
         state: store.getStateForUser(userId),
       });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
   app.post('/api/security/logout-others', (req: Request, res: Response) => {
     try {
-      const { userId, deviceName, ipAddress } = getActor(req);
-      const keepSessionId = req.body?.keepSessionId ? String(req.body.keepSessionId) : undefined;
+      const { userId, deviceName, ipAddress, workspaceId, rawToken, sessionId } = getActor(req);
+      const keepSessionId = req.body?.keepSessionId ? String(req.body.keepSessionId) : sessionId;
+      store.getPersistence().revokeOtherSessionsForUser(userId, rawToken);
       let terminatedCount = 0;
       for (const [client, session] of Array.from(activeSessions.entries())) {
-        if (session.userId === userId && (!keepSessionId || session.sessionId !== keepSessionId)) {
+        if (
+          session.workspaceId === workspaceId &&
+          session.userId === userId &&
+          (!keepSessionId || session.sessionId !== keepSessionId)
+        ) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(
               JSON.stringify({
@@ -2545,31 +2666,33 @@ function handleApi(app: express.Express) {
         method: 'تسجيل خروج عن بُعد',
         success: true,
       });
-      broadcastPresence();
-      broadcastStateChange(userId, `تسجيل الخروج من جميع الأجهزة الأخرى (${terminatedCount} جلسة)`);
-      res.json({ ok: true, terminatedCount, presence: getPresenceList(), state: store.getStateForUser(userId) });
+      broadcastPresence(workspaceId);
+      broadcastStateChange(userId, `تسجيل الخروج من جميع الأجهزة الأخرى (${terminatedCount} جلسة)`, workspaceId);
+      res.json({ ok: true, terminatedCount, presence: getPresenceList(workspaceId), state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
   app.get('/api/backups/:id/preview', (req: Request, res: Response) => {
     try {
+      const { userId } = getActor(req);
       const password = req.query.password ? String(req.query.password) : undefined;
-      const preview = store.previewBackup(String(req.params.id), password);
+      const preview = store.previewBackup(String(req.params.id), password, userId);
       res.json(preview);
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
   app.post('/api/backups/:id/preview', (req: Request, res: Response) => {
     try {
+      const { userId } = getActor(req);
       const password = req.body?.password ? String(req.body.password) : undefined;
-      const preview = store.previewBackup(String(req.params.id), password);
+      const preview = store.previewBackup(String(req.params.id), password, userId);
       res.json(preview);
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2580,7 +2703,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, 'تنظيف الملفات المؤقتة من مركز الإعدادات');
       res.json({ settings, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2592,7 +2715,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `إنشاء قالب تواصل: ${template.name}`);
       res.status(201).json({ template, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2603,7 +2726,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث قالب التواصل: ${template.name}`);
       res.json({ template, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2614,7 +2737,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, 'حذف قالب تواصل');
       res.json({ ok: true, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2625,7 +2748,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `إرسال رسالة لقالب ${result.template?.name || ''}`);
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2637,7 +2760,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `استيراد ${count} قالب تواصل`);
       res.status(201).json({ count, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2649,7 +2772,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث ملف المستأجر ${tenant.nameAr}`);
       res.json({ tenant, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2660,7 +2783,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تسجيل ملاحظة/مخالفة لملف المستأجر`);
       res.status(201).json({ note, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2671,7 +2794,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `جدولة موعد مع المستأجر ${log.targetName}`);
       res.status(201).json({ log, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2682,7 +2805,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تعديل بيانات العقد ${contract.internalNumber}`);
       res.json({ contract, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2694,7 +2817,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث المصروف ${expense.expenseNumber}`);
       res.json({ expense, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2705,7 +2828,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث ملف وتقييم المورد ${vendor.nameAr}`);
       res.json({ vendor, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2716,7 +2839,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تسجيل فاتورة مورد ${invoice.invoiceCode}`);
       res.status(201).json({ invoice, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2727,7 +2850,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث فاتورة المورد ${invoice.invoiceCode}`);
       res.json({ invoice, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2738,7 +2861,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `إضافة مصروف دوري: ${rule.title}`);
       res.status(201).json({ rule, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2749,7 +2872,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث المصروف الدوري: ${rule.title}`);
       res.json({ rule, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2760,7 +2883,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `توليد ${created.length} مسودة مصروف دوري`);
       res.status(201).json({ created, count: created.length, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2771,7 +2894,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث ميزانية العقار لشهر ${budget.month}`);
       res.status(201).json({ budget, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2782,7 +2905,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحديث بيانات المهتم ${lead.nameAr}`);
       res.json({ lead, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2793,7 +2916,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `إرسال بيانات المهتم ${escalation.snapshot.leadName} للمراجعة`);
       res.status(201).json({ escalation, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2809,7 +2932,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `قرار طلب المهتم ${escalation.requestCode}: ${escalation.status}`);
       res.json({ escalation, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2820,7 +2943,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تحويل المهتم ${result.lead.nameAr} إلى مستأجر`);
       res.status(201).json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2831,7 +2954,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تسجيل قراءة عداد ${reading.meterType} (${reading.meterNumber})`);
       res.status(201).json({ reading, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2902,7 +3025,7 @@ function handleApi(app: express.Express) {
       const since = req.query.since ? String(req.query.since) : undefined;
       res.json(store.getSyncDelta(userId, since));
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2987,7 +3110,7 @@ function handleApi(app: express.Express) {
         state: store.getStateForUser(userId),
       });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -2999,7 +3122,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `جدولة تقرير تلقائي: ${schedule.title}`);
       res.status(201).json({ schedule, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -3010,7 +3133,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, 'إزالة جدولة تقرير');
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -3021,7 +3144,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `تشغيل تقرير مجدول: ${schedule.title}`);
       res.json({ schedule, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -3033,7 +3156,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `إصدار فاتورة إلكترونية ZATCA (${invoice.invoiceNumber})`);
       res.status(201).json({ invoice, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -3045,7 +3168,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `حفظ تقرير مفضل: ${preset.title}`);
       res.status(201).json({ preset, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -3056,7 +3179,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, 'إزالة تقرير مفضل');
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -3067,7 +3190,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, `حفظ فلتر بحث: ${filter.name}`);
       res.status(201).json({ filter, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
@@ -3078,24 +3201,31 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, 'حذف فلتر بحث');
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
   // Custom Disk Storage Endpoints (Backups / Archive / Documents)
-  app.get('/api/storage/status', (_req: Request, res: Response) => {
+  app.get('/api/storage/status', (req: Request, res: Response) => {
     try {
+      const { userId, deviceName } = getActor(req);
+      store.assertModuleAction(userId, 'settings', 'view', { entityType: 'StorageStatus', deviceName });
       res.json(store.getStorageStatus());
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 
   app.post('/api/storage/validate-path', (req: Request, res: Response) => {
     try {
+      const { userId, deviceName } = getActor(req);
+      store.assertModuleAction(userId, 'settings', 'edit', { entityType: 'StoragePath', deviceName });
       const result = store.validateStorageFolder(String(req.body?.path || ''));
       res.json(result);
     } catch (e: unknown) {
+      if (e instanceof PermissionDeniedError) {
+        return sendApiError(res, e, 403);
+      }
       res.status(400).json({ ok: false, error: (e as Error).message });
     }
   });
@@ -3107,7 +3237,7 @@ function handleApi(app: express.Express) {
       broadcastStateChange(userId, 'مزامنة وتهيئة مجلدات التخزين المحلية على القرص');
       res.json({ ...result, status: store.getStorageStatus(), state: store.getStateForUser(userId) });
     } catch (e: unknown) {
-      res.status(400).json({ error: (e as Error).message });
+      sendApiError(res, e, 400);
     }
   });
 }

@@ -76,6 +76,7 @@ import {
 import { formatDateTime, formatDisplayDate, formatSar } from '../utils/formatters';
 import { triggerHaptic } from '../utils/haptics';
 import {
+  ALL_PROPERTIES_SCOPE,
   getDefaultModulePermissionsForRole,
   getEffectiveModulePermissions,
   RBAC_ACTIONS,
@@ -167,7 +168,7 @@ interface InviteDispatchState {
 }
 
 export function TeamWorkforceView() {
-  const { state, currentUser, lang, hasPermission, mutate, apiFetch, refreshState, pushToast, presence } = useAqar();
+  const { state, currentUser, lang, hasPermission, hasModulePermission, mutate, apiFetch, refreshState, pushToast, presence } = useAqar();
 
   const [activeTab, setActiveTab] = useState<WorkforceTab>('members');
   const [searchQuery, setSearchQuery] = useState('');
@@ -467,8 +468,10 @@ export function TeamWorkforceView() {
 
   const isSysOwner = currentUser.role === 'sys_owner';
   const isCompanyManager = currentUser.role === 'gm';
-  const canManageTeam = hasPermission('manage_users') && (isSysOwner || isCompanyManager);
-  const canManageTasks = hasPermission('manage_tasks');
+  const canManageTeam = (hasPermission('manage_users') || hasModulePermission('team', 'manage')) && (isSysOwner || isCompanyManager);
+  const canManageTasks = hasModulePermission('tasks', 'create') || hasPermission('manage_tasks');
+  const canViewAudit = hasModulePermission('audit', 'view') || hasPermission('view_audit');
+  const canExportAudit = hasModulePermission('audit', 'export') || hasPermission('view_audit');
   const selectedUser = selectedUserId ? users.find((u) => u.id === selectedUserId) || null : null;
   const selectedTask = selectedTaskId ? tasks.find((t) => t.id === selectedTaskId) || null : null;
 
@@ -911,7 +914,13 @@ export function TeamWorkforceView() {
 
   const handleToggleUserPropertyScope = async (user: StaffUser, propId: string) => {
     const current = user.allowedPropertyIds || [];
-    const next = current.includes(propId) ? current.filter((id) => id !== propId) : [...current, propId];
+    let next: string[];
+    if (propId === ALL_PROPERTIES_SCOPE) {
+      next = current.includes(ALL_PROPERTIES_SCOPE) ? [] : [ALL_PROPERTIES_SCOPE];
+    } else {
+      const specific = current.filter((id) => id !== ALL_PROPERTIES_SCOPE);
+      next = specific.includes(propId) ? specific.filter((id) => id !== propId) : [...specific, propId];
+    }
     const res = await apiFetch(`/api/team/employees/${encodeURIComponent(user.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -925,7 +934,11 @@ export function TeamWorkforceView() {
     await refreshState();
     pushToast(
       'success',
-      next.length > 0 ? `تم تقييد صلاحية العقارات (${next.length} عقار)` : 'تم فتح الصلاحية لجميع العقارات'
+      next.includes(ALL_PROPERTIES_SCOPE)
+        ? 'تم فتح الصلاحية لكافة عقارات الشركة'
+        : next.length > 0
+        ? `تم تقييد صلاحية العقارات (${next.length} عقار)`
+        : 'تم تقييد الوصول بالكامل (0 عقار — لا يرى الموظف أي عقار حتى تحديد عقار واحد على الأقل)'
     );
   };
 
@@ -1152,23 +1165,27 @@ export function TeamWorkforceView() {
         <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-200/70 dark:bg-white/[0.05] overflow-x-auto no-print">
           {(
             [
-              { id: 'members', labelAr: `الفريق (${users.length})`, icon: Users },
+              { id: 'members', labelAr: `الفريق (${users.length})`, icon: Users, allowed: true },
               {
                 id: 'invitations',
                 labelAr: `الدعوات (${invitations.filter((i) => i.status === 'بانتظار التفعيل').length}/${invitations.length})`,
                 icon: Send,
+                allowed: canManageTeam || hasModulePermission('team', 'view'),
               },
-              { id: 'tasks', labelAr: `المهام الذكية (${filteredTasks.length})`, icon: Kanban },
-              { id: 'performance', labelAr: 'الأداء والتقارير', icon: BarChart3 },
-              { id: 'rbac', labelAr: 'الأدوار والصلاحيات (18×7)', icon: Shield },
-              { id: 'audit', labelAr: `سجل التدقيق (${auditLogs.length})`, icon: Activity },
+              { id: 'tasks', labelAr: `المهام الذكية (${filteredTasks.length})`, icon: Kanban, allowed: true },
+              { id: 'performance', labelAr: 'الأداء والتقارير', icon: BarChart3, allowed: true },
+              { id: 'rbac', labelAr: 'الأدوار والصلاحيات (18×7)', icon: Shield, allowed: true },
+              { id: 'audit', labelAr: `سجل التدقيق (${auditLogs.length})`, icon: Activity, allowed: canViewAudit },
               {
                 id: 'security',
                 labelAr: `الأمان والمزامنة${pendingConflicts.length > 0 ? ` (${pendingConflicts.length})` : ''}`,
                 icon: Lock,
+                allowed: canManageTeam || hasModulePermission('team', 'view'),
               },
-            ] as { id: WorkforceTab; labelAr: string; icon: React.ComponentType<{ className?: string }> }[]
-          ).map((t) => {
+            ] as { id: WorkforceTab; labelAr: string; icon: React.ComponentType<{ className?: string }>; allowed: boolean }[]
+          )
+            .filter((t) => t.allowed)
+            .map((t) => {
             const Icon = t.icon;
             const active = activeTab === t.id;
             return (
@@ -1323,10 +1340,13 @@ export function TeamWorkforceView() {
                   overdueCount: 0,
                   avgHours: 0,
                 };
+                const propIds = user.allowedPropertyIds || [];
                 const scopeLabel =
-                  user.allowedPropertyIds && user.allowedPropertyIds.length > 0
-                    ? `نطاق مقيد: ${user.allowedPropertyIds.length} عقارات`
-                    : 'كل عقارات الشركة';
+                  user.role === 'sys_owner' || propIds.includes(ALL_PROPERTIES_SCOPE)
+                    ? 'كافة عقارات الشركة'
+                    : propIds.length > 0
+                    ? `نطاق مقيد: ${propIds.length} عقارات`
+                    : 'مقيد (0 عقار)';
                 const acctColorClass =
                   acctStatus === 'نشط'
                     ? statusTextColor(status)
@@ -2254,24 +2274,26 @@ export function TeamWorkforceView() {
                 </div>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 no-print">
-              <button
-                type="button"
-                onClick={handleExportAuditExcel}
-                className="min-h-[36px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#13192B] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>تصدير Excel</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleExportAuditPdf}
-                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#26478D] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>تصدير PDF رسمي</span>
-              </button>
-            </div>
+            {canExportAudit && (
+              <div className="flex flex-wrap items-center gap-2 no-print">
+                <button
+                  type="button"
+                  onClick={handleExportAuditExcel}
+                  className="min-h-[36px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#13192B] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>تصدير Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportAuditPdf}
+                  className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#26478D] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>تصدير PDF رسمي</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Audit Filters */}
@@ -2433,11 +2455,12 @@ export function TeamWorkforceView() {
                     type="number"
                     min={6}
                     max={20}
+                    disabled={!canManageTeam}
                     value={effectivePolicy.minPasswordLength}
                     onChange={(e) =>
                       setPolicyDraft({ ...effectivePolicy, minPasswordLength: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num disabled:opacity-50"
                   />
                 </div>
                 <div className="space-y-1">
@@ -2446,11 +2469,12 @@ export function TeamWorkforceView() {
                     type="number"
                     min={30}
                     max={365}
+                    disabled={!canManageTeam}
                     value={effectivePolicy.passwordExpiryDays}
                     onChange={(e) =>
                       setPolicyDraft({ ...effectivePolicy, passwordExpiryDays: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num disabled:opacity-50"
                   />
                 </div>
                 <div className="space-y-1">
@@ -2459,11 +2483,12 @@ export function TeamWorkforceView() {
                     type="number"
                     min={1}
                     max={60}
+                    disabled={!canManageTeam}
                     value={effectivePolicy.autoLockMinutes}
                     onChange={(e) =>
                       setPolicyDraft({ ...effectivePolicy, autoLockMinutes: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num disabled:opacity-50"
                   />
                 </div>
                 <div className="space-y-1">
@@ -2472,11 +2497,12 @@ export function TeamWorkforceView() {
                     type="number"
                     min={3}
                     max={10}
+                    disabled={!canManageTeam}
                     value={effectivePolicy.maxFailedAttempts}
                     onChange={(e) =>
                       setPolicyDraft({ ...effectivePolicy, maxFailedAttempts: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-transparent font-mono-num disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -2486,17 +2512,19 @@ export function TeamWorkforceView() {
                   <span>إلزام وجود حروف وأرقام ورموز خاصة بكلمة المرور</span>
                   <input
                     type="checkbox"
+                    disabled={!canManageTeam}
                     checked={effectivePolicy.requireSpecialChars}
                     onChange={(e) =>
                       setPolicyDraft({ ...effectivePolicy, requireSpecialChars: e.target.checked })
                     }
-                    className="w-4 h-4 accent-[#26478D]"
+                    className="w-4 h-4 accent-[#26478D] disabled:opacity-40"
                   />
                 </label>
                 <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-white/10 cursor-pointer">
                   <span>إلزام المصادقة الثنائية (2FA) للمدراء والمحاسبين</span>
                   <input
                     type="checkbox"
+                    disabled={!canManageTeam}
                     checked={effectivePolicy.require2faForManagersAndAccountants}
                     onChange={(e) =>
                       setPolicyDraft({
@@ -2504,7 +2532,7 @@ export function TeamWorkforceView() {
                         require2faForManagersAndAccountants: e.target.checked,
                       })
                     }
-                    className="w-4 h-4 accent-[#26478D]"
+                    className="w-4 h-4 accent-[#26478D] disabled:opacity-40"
                   />
                 </label>
               </div>
@@ -2853,42 +2881,71 @@ export function TeamWorkforceView() {
                     )}
 
                     {/* Property-Level Scope */}
-                    <div className="p-4 rounded-xl border border-slate-200 dark:border-white/10 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="font-bold flex items-center gap-1.5">
-                          <Building2 className="w-4 h-4 text-[#26478D] dark:text-blue-400" />
-                          <span>صلاحيات على مستوى العقار (Property-Level Scope)</span>
-                        </div>
-                        <span className="text-[11px] text-slate-500">
-                          {selectedUser.allowedPropertyIds?.length
-                            ? `مقيد بـ ${selectedUser.allowedPropertyIds.length} عقار`
-                            : 'كافة عقارات الشركة'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {properties.map((p) => {
-                          const checked = (selectedUser.allowedPropertyIds || []).includes(p.id);
-                          return (
-                            <label
-                              key={p.id}
-                              className="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-white/10 cursor-pointer"
+                    {(() => {
+                      const scopeList = selectedUser.allowedPropertyIds || [];
+                      const hasAllScope = selectedUser.role === 'sys_owner' || scopeList.includes(ALL_PROPERTIES_SCOPE);
+                      const specificList = scopeList.filter((id) => id !== ALL_PROPERTIES_SCOPE);
+                      return (
+                        <div className="p-4 rounded-xl border border-slate-200 dark:border-white/10 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="font-bold flex items-center gap-1.5">
+                              <Building2 className="w-4 h-4 text-[#26478D] dark:text-blue-400" />
+                              <span>صلاحيات على مستوى العقار (Property-Level Scope)</span>
+                            </div>
+                            <span
+                              className={`text-[11px] font-semibold ${
+                                hasAllScope
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : specificList.length > 0
+                                  ? 'text-[#26478D] dark:text-blue-400'
+                                  : 'text-amber-600 dark:text-amber-400'
+                              }`}
                             >
+                              {hasAllScope
+                                ? 'كافة عقارات الشركة (*)'
+                                : specificList.length > 0
+                                ? `مقيد بـ ${specificList.length} عقار`
+                                : 'مقيد بالكامل (0 عقار)'}
+                            </span>
+                          </div>
+                          {selectedUser.role !== 'sys_owner' && (
+                            <label className="flex items-center gap-2 p-2.5 rounded-lg border border-[#26478D]/30 bg-[#26478D]/5 cursor-pointer font-semibold">
                               <input
                                 type="checkbox"
-                                checked={checked}
+                                checked={scopeList.includes(ALL_PROPERTIES_SCOPE)}
                                 disabled={!permEditable}
-                                onChange={() => void handleToggleUserPropertyScope(selectedUser, p.id)}
+                                onChange={() => void handleToggleUserPropertyScope(selectedUser, ALL_PROPERTIES_SCOPE)}
                                 className="w-4 h-4 accent-[#26478D] disabled:opacity-40"
                               />
-                              <span className="truncate">{p.nameAr}</span>
+                              <span>كافة عقارات الشركة (*)</span>
                             </label>
-                          );
-                        })}
-                      </div>
-                      <p className="text-[11px] text-slate-500">
-                        إذا لم يتم تحديد أي عقار، يرى الموظف جميع عقارات الشركة حسب دوره.
-                      </p>
-                    </div>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {properties.map((p) => {
+                              const checked = specificList.includes(p.id);
+                              return (
+                                <label
+                                  key={p.id}
+                                  className="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-white/10 cursor-pointer"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    disabled={!permEditable || selectedUser.role === 'sys_owner'}
+                                    onChange={() => void handleToggleUserPropertyScope(selectedUser, p.id)}
+                                    className="w-4 h-4 accent-[#26478D] disabled:opacity-40"
+                                  />
+                                  <span className="truncate">{p.nameAr}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            القائمة الفارغة (0 عقار) تمنع الوصول إلى أي عقار تماماً — لمنح الوصول الشامل فعّل خيار «كافة عقارات الشركة (*)» أو اختر العقارات المحددة.
+                          </p>
+                        </div>
+                      );
+                    })()}
 
                     {/* 18-Module x 7-Action Granular Matrix */}
                     <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-x-auto">
@@ -3268,6 +3325,7 @@ export function TeamWorkforceView() {
                       <span>تفعيل ساعات عدم الإزعاج (تأجيل الإشعارات غير العاجلة)</span>
                       <input
                         type="checkbox"
+                        disabled={!canManageTeam && currentUser.id !== selectedUser.id}
                         checked={Boolean(selectedUser.notificationPrefs?.dndEnabled)}
                         onChange={(e) =>
                           handleUpdateUserPatch(
@@ -3276,7 +3334,7 @@ export function TeamWorkforceView() {
                             'تم تحديث وضع عدم الإزعاج'
                           )
                         }
-                        className="w-4 h-4 accent-[#26478D]"
+                        className="w-4 h-4 accent-[#26478D] disabled:opacity-40"
                       />
                     </label>
                     <div className="grid grid-cols-2 gap-3">
@@ -3284,26 +3342,28 @@ export function TeamWorkforceView() {
                         <label className="text-slate-500">من الساعة</label>
                         <input
                           type="time"
+                          disabled={!canManageTeam && currentUser.id !== selectedUser.id}
                           value={selectedUser.notificationPrefs?.dndFrom || '22:00'}
                           onChange={(e) =>
                             handleUpdateUserPatch(selectedUser.id, {
                               notificationPrefs: { dndFrom: e.target.value },
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-transparent font-mono-num"
+                          className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-transparent font-mono-num disabled:opacity-50"
                         />
                       </div>
                       <div className="space-y-1">
                         <label className="text-slate-500">إلى الساعة</label>
                         <input
                           type="time"
+                          disabled={!canManageTeam && currentUser.id !== selectedUser.id}
                           value={selectedUser.notificationPrefs?.dndTo || '07:00'}
                           onChange={(e) =>
                             handleUpdateUserPatch(selectedUser.id, {
                               notificationPrefs: { dndTo: e.target.value },
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-transparent font-mono-num"
+                          className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-transparent font-mono-num disabled:opacity-50"
                         />
                       </div>
                     </div>
@@ -3692,7 +3752,32 @@ export function TeamWorkforceView() {
 
             {/* Property Scope & Custom Module Override */}
             <div className="space-y-2">
-              <div className="font-bold">تقييد الوصول بعقارات محددة (اختياري)</div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-bold">نطاق العقارات المسموح بها للموظف</div>
+                <span className="text-[11px] text-slate-500">
+                  {wizardForm.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE)
+                    ? 'كافة عقارات الشركة (*)'
+                    : wizardForm.allowedPropertyIds.length > 0
+                    ? `${wizardForm.allowedPropertyIds.length} عقار محدد`
+                    : '0 عقار (مقيد بالكامل حتى الاختيار)'}
+                </span>
+              </div>
+              <label className="flex items-center gap-2 p-2 rounded-lg border border-[#26478D]/30 bg-[#26478D]/5 cursor-pointer font-semibold">
+                <input
+                  type="checkbox"
+                  checked={wizardForm.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE)}
+                  onChange={() =>
+                    setWizardForm((prev) => ({
+                      ...prev,
+                      allowedPropertyIds: prev.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE)
+                        ? []
+                        : [ALL_PROPERTIES_SCOPE],
+                    }))
+                  }
+                  className="w-3.5 h-3.5 accent-[#26478D]"
+                />
+                <span>كافة عقارات الشركة (*)</span>
+              </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-28 overflow-y-auto">
                 {properties.map((p) => {
                   const checked = wizardForm.allowedPropertyIds.includes(p.id);
@@ -3705,12 +3790,15 @@ export function TeamWorkforceView() {
                         type="checkbox"
                         checked={checked}
                         onChange={() =>
-                          setWizardForm((prev) => ({
-                            ...prev,
-                            allowedPropertyIds: checked
-                              ? prev.allowedPropertyIds.filter((id) => id !== p.id)
-                              : [...prev.allowedPropertyIds, p.id],
-                          }))
+                          setWizardForm((prev) => {
+                            const specific = prev.allowedPropertyIds.filter((id) => id !== ALL_PROPERTIES_SCOPE);
+                            return {
+                              ...prev,
+                              allowedPropertyIds: checked
+                                ? specific.filter((id) => id !== p.id)
+                                : [...specific, p.id],
+                            };
+                          })
                         }
                         className="w-3.5 h-3.5 accent-[#26478D]"
                       />

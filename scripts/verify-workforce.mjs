@@ -10,6 +10,7 @@ const TEST_PORT = 3459;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 
 process.env.NODE_ENV = 'production';
+process.env.AQAR_ALLOW_SEED_DEFAULTS = 'true';
 process.env.AQARPLUS_NO_AUTO_START = '1';
 process.env.AQARPLUS_USER_DATA_DIR = TMP_DATA_DIR;
 process.env.AQARPLUS_DIST_DIR = path.resolve(process.cwd(), 'dist');

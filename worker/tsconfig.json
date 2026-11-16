@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "../src/types/aqar.ts", "../server/seed.ts"]
+  "include": ["src/**/*.ts", "../src/types/aqar.ts", "../src/utils/rbac.ts", "../server/seed.ts"]
 }

@@ -285,7 +285,7 @@ function createInitialSeed() {
         managerRating: 5,
         lastActivitySummary: "\u0645\u0631\u0627\u062C\u0639\u0629 \u0633\u064A\u0627\u0633\u0629 \u0627\u0644\u0623\u0645\u0627\u0646 \u0648\u0627\u0644\u0646\u0633\u062E \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0627\u0644\u064A\u0648\u0645\u064A\u0629",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: true,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-20T09:00:00.000Z",
@@ -318,7 +318,7 @@ function createInitialSeed() {
         managerRating: 5,
         lastActivitySummary: "\u0627\u0639\u062A\u0645\u062F \u0645\u0635\u0631\u0648\u0641 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u062C\u0645\u0639 \u0642\u0628\u0644 18 \u062F\u0642\u064A\u0642\u0629",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: true,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-25T10:00:00.000Z",
@@ -343,6 +343,7 @@ function createInitialSeed() {
         email: "salman@aqarplus.sa",
         phone: "0505123402",
         approvalLimitSar: 5e3,
+        allowedPropertyIds: ["*"],
         active: true,
         deviceName: "Windows Desktop \xB7 \u0642\u0633\u0645 \u0627\u0644\u0645\u062D\u0627\u0633\u0628\u0629",
         lastActiveAt: now,
@@ -351,7 +352,7 @@ function createInitialSeed() {
         managerRating: 4.8,
         lastActivitySummary: "\u0633\u062C\u0644 \u0633\u0646\u062F \u0642\u0628\u0636 9,000 \u0631.\u0633 \u0642\u0628\u0644 5 \u062F\u0642\u0627\u0626\u0642",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: false,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-15T11:00:00.000Z",
@@ -376,6 +377,7 @@ function createInitialSeed() {
         email: "reem@aqarplus.sa",
         phone: "0505123403",
         approvalLimitSar: 1e3,
+        allowedPropertyIds: ["*"],
         active: true,
         deviceName: "iPad Pro \xB7 \u0645\u0643\u062A\u0628 \u0627\u0644\u062A\u0623\u062C\u064A\u0631",
         lastActiveAt: now,
@@ -410,6 +412,7 @@ function createInitialSeed() {
         email: "majed@aqarplus.sa",
         phone: "0505123404",
         approvalLimitSar: 2e3,
+        allowedPropertyIds: ["*"],
         active: true,
         deviceName: "Android Tablet \xB7 \u0645\u064A\u062F\u0627\u0646\u064A",
         lastActiveAt: now,
@@ -442,6 +445,7 @@ function createInitialSeed() {
         email: "badr@aqarplus.sa",
         phone: "0505123406",
         approvalLimitSar: 1500,
+        allowedPropertyIds: ["*"],
         active: true,
         deviceName: "iPad Air \xB7 \u0642\u0633\u0645 \u0627\u0644\u0635\u064A\u0627\u0646\u0629",
         lastActiveAt: now,
@@ -474,6 +478,7 @@ function createInitialSeed() {
         email: "omar@aqarplus.sa",
         phone: "0505123405",
         approvalLimitSar: 300,
+        allowedPropertyIds: ["*"],
         active: true,
         deviceName: "Android Mobile \xB7 \u062C\u0648\u0627\u0644 \u0627\u0644\u0641\u0646\u064A",
         lastActiveAt: now,
@@ -506,6 +511,7 @@ function createInitialSeed() {
         email: "noura@aqarplus.sa",
         phone: "0505123407",
         approvalLimitSar: 0,
+        allowedPropertyIds: ["*"],
         active: true,
         deviceName: "Windows Reception \xB7 \u0645\u0643\u062A\u0628 \u0627\u0644\u0627\u0633\u062A\u0642\u0628\u0627\u0644",
         lastActiveAt: "2026-11-14T09:40:00.000Z",
@@ -538,6 +544,7 @@ function createInitialSeed() {
         email: "audit@aqarplus.sa",
         phone: "0505123408",
         approvalLimitSar: 0,
+        allowedPropertyIds: ["*"],
         active: true,
         deviceName: "Laptop \xB7 \u0648\u062D\u062F\u0629 \u0627\u0644\u0631\u0642\u0627\u0628\u0629 \u0648\u0627\u0644\u062A\u062F\u0642\u064A\u0642",
         lastActiveAt: "2026-11-14T08:50:00.000Z",
@@ -546,7 +553,7 @@ function createInitialSeed() {
         managerRating: 5,
         lastActivitySummary: "\u0635\u062F\u0651\u0631 \u062A\u0642\u0631\u064A\u0631 \u0627\u0644\u062A\u062F\u0642\u064A\u0642 \u0627\u0644\u0634\u0647\u0631\u064A \u0648\u0633\u062C\u0644 \u0627\u0644\u0639\u0643\u0633 \u0627\u0644\u0645\u062D\u0627\u0633\u0628\u064A",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: false,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-18T09:00:00.000Z",
@@ -2947,6 +2954,828 @@ function createInitialSeed() {
   };
 }
 
+// src/utils/rbac.ts
+var RBAC_MODULES = [
+  { key: "dashboard", labelAr: "\u0644\u0648\u062D\u0629 \u0627\u0644\u062A\u062D\u0643\u0645", labelEn: "Dashboard", groupAr: "\u0627\u0644\u0639\u0645\u0644\u064A\u0627\u062A" },
+  { key: "properties", labelAr: "\u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A", labelEn: "Properties", groupAr: "\u0627\u0644\u0645\u062D\u0641\u0638\u0629" },
+  { key: "units", labelAr: "\u0627\u0644\u0648\u062D\u062F\u0627\u062A", labelEn: "Units", groupAr: "\u0627\u0644\u0645\u062D\u0641\u0638\u0629" },
+  { key: "tenants", labelAr: "\u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631\u0648\u0646 \u0648\u0627\u0644\u0645\u0647\u062A\u0645\u0648\u0646", labelEn: "Tenants & Leads", groupAr: "\u0627\u0644\u062A\u0623\u062C\u064A\u0631" },
+  { key: "contracts", labelAr: "\u0627\u0644\u0639\u0642\u0648\u062F \u0648\u0625\u064A\u062C\u0627\u0631", labelEn: "Contracts", groupAr: "\u0627\u0644\u062A\u0623\u062C\u064A\u0631" },
+  { key: "payments", labelAr: "\u0627\u0644\u062F\u0641\u0639\u0627\u062A \u0648\u0627\u0644\u062A\u062D\u0635\u064A\u0644", labelEn: "Payments", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "finance", labelAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u0648\u0627\u0644\u0645\u062D\u0627\u0633\u0628\u0629", labelEn: "Finance & Ledger", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "receipts", labelAr: "\u0627\u0644\u0625\u064A\u0635\u0627\u0644\u0627\u062A \u0648\u0627\u0644\u0633\u0646\u062F\u0627\u062A", labelEn: "Receipts", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "expenses", labelAr: "\u0627\u0644\u0645\u0635\u0631\u0648\u0641\u0627\u062A \u0648\u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0627\u062A", labelEn: "Expenses", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "maintenance", labelAr: "\u0627\u0644\u0635\u064A\u0627\u0646\u0629 \u0648\u0627\u0644\u0628\u0644\u0627\u063A\u0627\u062A", labelEn: "Maintenance", groupAr: "\u0627\u0644\u062A\u0634\u063A\u064A\u0644" },
+  { key: "tasks", labelAr: "\u0627\u0644\u0645\u0647\u0627\u0645 \u0627\u0644\u064A\u0648\u0645\u064A\u0629", labelEn: "Tasks", groupAr: "\u0627\u0644\u062A\u0634\u063A\u064A\u0644" },
+  { key: "reports", labelAr: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u062A\u062D\u0644\u064A\u0644\u0627\u062A", labelEn: "Reports", groupAr: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631" },
+  { key: "documents", labelAr: "\u062E\u0632\u0646\u0629 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A", labelEn: "Documents", groupAr: "\u0627\u0644\u0623\u0631\u0634\u0641\u0629" },
+  { key: "archive", labelAr: "\u0627\u0644\u0623\u0631\u0634\u064A\u0641 \u0627\u0644\u0630\u0643\u064A", labelEn: "Smart Archive", groupAr: "\u0627\u0644\u0623\u0631\u0634\u0641\u0629" },
+  { key: "team", labelAr: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645\u0648\u0646 \u0648\u0641\u0631\u064A\u0642 \u0627\u0644\u0639\u0645\u0644", labelEn: "Team & Workforce", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" },
+  { key: "audit", labelAr: "\u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642", labelEn: "Audit Logs", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" },
+  { key: "settings", labelAr: "\u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A", labelEn: "Settings", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" },
+  { key: "backups", labelAr: "\u0627\u0644\u0646\u0633\u062E \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A", labelEn: "Backups", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" }
+];
+var ROLE_TEMPLATES = [
+  {
+    key: "sys_owner",
+    labelAr: "\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645",
+    labelEn: "System Owner",
+    tierAr: "\u062A\u062D\u0643\u0645 \u0643\u0627\u0645\u0644",
+    descAr: "\u0627\u0644\u062A\u062D\u0643\u0645 \u0627\u0644\u0643\u0627\u0645\u0644 \u0628\u0627\u0644\u0645\u0646\u0634\u0623\u0629\u060C \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u0648\u0627\u0644\u0623\u062F\u0648\u0627\u0631\u060C \u0627\u0644\u0623\u0645\u0627\u0646\u060C \u0648\u0627\u0644\u0646\u0633\u062E \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A",
+    defaultLimitSar: 9999999
+  },
+  {
+    key: "gm",
+    labelAr: "\u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629",
+    labelEn: "Company Manager",
+    tierAr: "\u0645\u0631\u062A\u0641\u0639",
+    descAr: "\u0627\u0644\u0625\u0634\u0631\u0627\u0641 \u0627\u0644\u0639\u0627\u0645\u060C \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0627\u0644\u0645\u0627\u0644\u064A\u0629\u060C \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u0645\u0635\u0631\u0648\u0641\u0627\u062A \u0627\u0644\u0643\u0628\u0631\u0649 \u0648\u0627\u0644\u0642\u0631\u0627\u0631\u0627\u062A",
+    defaultLimitSar: 5e5
+  },
+  {
+    key: "supervisor",
+    labelAr: "\u0627\u0644\u0645\u0634\u0631\u0641 \u0627\u0644\u0639\u0642\u0627\u0631\u064A",
+    labelEn: "Property Supervisor",
+    tierAr: "\u0645\u062A\u0648\u0633\u0637-\u0645\u0631\u062A\u0641\u0639",
+    descAr: "\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A \u0648\u0627\u0644\u0648\u062D\u062F\u0627\u062A\u060C \u0645\u062A\u0627\u0628\u0639\u0629 \u0627\u0644\u0625\u0634\u063A\u0627\u0644 \u0648\u0645\u062D\u0627\u0636\u0631 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0648\u0627\u0644\u0625\u062E\u0644\u0627\u0621",
+    defaultLimitSar: 25e3
+  },
+  {
+    key: "accountant",
+    labelAr: "\u0627\u0644\u0645\u062D\u0627\u0633\u0628",
+    labelEn: "Accountant",
+    tierAr: "\u0645\u0627\u0644\u064A \u0641\u0642\u0637",
+    descAr: "\u0627\u0644\u062A\u062D\u0635\u064A\u0644\u060C \u0633\u0646\u062F\u0627\u062A \u0627\u0644\u0642\u0628\u0636\u060C \u0627\u0644\u0645\u0635\u0631\u0648\u0641\u0627\u062A\u060C \u0627\u0644\u0642\u064A\u0648\u062F \u0627\u0644\u0645\u062D\u0627\u0633\u0628\u064A\u0629 \u0648\u062A\u0642\u0627\u0631\u064A\u0631 \u0627\u0644\u0645\u0644\u0627\u0643",
+    defaultLimitSar: 5e4
+  },
+  {
+    key: "leasing",
+    labelAr: "\u0645\u0648\u0638\u0641 \u0627\u0644\u062A\u0623\u062C\u064A\u0631",
+    labelEn: "Leasing Agent",
+    tierAr: "\u0645\u062A\u0648\u0633\u0637",
+    descAr: "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631\u064A\u0646\u060C \u0625\u0628\u0631\u0627\u0645 \u0627\u0644\u0639\u0642\u0648\u062F\u060C \u0627\u0644\u062A\u0648\u062B\u064A\u0642 \u0641\u064A \u0625\u064A\u062C\u0627\u0631 \u0648\u0645\u062A\u0627\u0628\u0639\u0629 \u0627\u0644\u0645\u062A\u0623\u062E\u0631\u0627\u062A",
+    defaultLimitSar: 0
+  },
+  {
+    key: "maint_manager",
+    labelAr: "\u0645\u0633\u0624\u0648\u0644 \u0627\u0644\u0635\u064A\u0627\u0646\u0629",
+    labelEn: "Maintenance Manager",
+    tierAr: "\u062A\u0634\u063A\u064A\u0644\u064A",
+    descAr: "\u0627\u0633\u062A\u0642\u0628\u0627\u0644 \u0628\u0644\u0627\u063A\u0627\u062A \u0627\u0644\u0635\u064A\u0627\u0646\u0629\u060C \u0625\u0633\u0646\u0627\u062F \u0627\u0644\u0645\u0647\u0627\u0645 \u0644\u0644\u0641\u0646\u064A\u064A\u0646\u060C \u0648\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u0648\u0631\u062F\u064A\u0646",
+    defaultLimitSar: 15e3
+  },
+  {
+    key: "technician",
+    labelAr: "\u0641\u0646\u064A \u0627\u0644\u0635\u064A\u0627\u0646\u0629",
+    labelEn: "Technician",
+    tierAr: "\u0645\u062D\u062F\u0648\u062F",
+    descAr: "\u062A\u0646\u0641\u064A\u0630 \u0627\u0644\u0645\u0647\u0627\u0645 \u0627\u0644\u0645\u064A\u062F\u0627\u0646\u064A\u0629 \u0627\u0644\u0645\u0633\u0646\u062F\u0629 \u0648\u0631\u0641\u0639 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u062A\u0634\u062E\u064A\u0635 \u0648\u0627\u0644\u0635\u0648\u0631",
+    defaultLimitSar: 0
+  },
+  {
+    key: "receptionist",
+    labelAr: "\u0645\u0648\u0638\u0641 \u0627\u0644\u0627\u0633\u062A\u0642\u0628\u0627\u0644",
+    labelEn: "Receptionist",
+    tierAr: "\u0623\u0633\u0627\u0633\u064A",
+    descAr: "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0623\u0648\u0644\u064A\u0629 \u0644\u0644\u0639\u0645\u0644\u0627\u0621\u060C \u0631\u0641\u0639 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A\u060C \u0648\u062A\u0648\u062C\u064A\u0647 \u0627\u0644\u0628\u0644\u0627\u063A\u0627\u062A",
+    defaultLimitSar: 0
+  },
+  {
+    key: "auditor",
+    labelAr: "\u0627\u0644\u0645\u0631\u0627\u062C\u0639",
+    labelEn: "Auditor",
+    tierAr: "\u0644\u0644\u0642\u0631\u0627\u0621\u0629 \u0641\u0642\u0637",
+    descAr: "\u0627\u0644\u0627\u0637\u0644\u0627\u0639 \u0627\u0644\u0643\u0627\u0645\u0644 \u0639\u0644\u0649 \u0627\u0644\u0633\u062C\u0644\u0627\u062A \u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u0648\u0627\u0644\u062A\u0634\u063A\u064A\u0644\u064A\u0629 \u0648\u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642 \u062F\u0648\u0646 \u062A\u0639\u062F\u064A\u0644",
+    defaultLimitSar: 0
+  },
+  {
+    key: "owner",
+    labelAr: "\u0628\u0648\u0627\u0628\u0629 \u0627\u0644\u0645\u0627\u0644\u0643",
+    labelEn: "Owner Portal",
+    tierAr: "\u0645\u062D\u0641\u0638\u0629 \u0627\u0644\u0645\u0627\u0644\u0643",
+    descAr: "\u0645\u062A\u0627\u0628\u0639\u0629 \u0639\u0648\u0627\u0626\u062F \u0648\u0625\u0634\u063A\u0627\u0644 \u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A \u0627\u0644\u0645\u0645\u0644\u0648\u0643\u0629 \u0648\u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u0644\u062A\u0633\u0648\u064A\u0629 \u0641\u0642\u0637",
+    defaultLimitSar: 0
+  }
+];
+var ALL_ACTIONS = ["view", "create", "edit", "delete_void", "approve", "export", "manage"];
+function getDefaultModulePermissionsForRole(role) {
+  if (role === "sys_owner" || role === "gm") {
+    return Object.fromEntries(RBAC_MODULES.map((m) => [m.key, [...ALL_ACTIONS]]));
+  }
+  if (role === "auditor") {
+    return Object.fromEntries(
+      RBAC_MODULES.filter((m) => m.key !== "settings" && m.key !== "backups").map((m) => [
+        m.key,
+        ["view", "export"]
+      ])
+    );
+  }
+  if (role === "accountant") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      tenants: ["view"],
+      contracts: ["view"],
+      payments: ["view", "create", "edit", "approve", "export"],
+      finance: ["view", "create", "edit", "approve", "export", "manage"],
+      receipts: ["view", "create", "delete_void", "export"],
+      expenses: ["view", "create", "edit", "export"],
+      reports: ["view", "export"],
+      documents: ["view", "create", "export"],
+      archive: ["view", "export"],
+      audit: ["view"]
+    };
+  }
+  if (role === "supervisor") {
+    return {
+      dashboard: ["view"],
+      properties: ["view", "create", "edit", "export"],
+      units: ["view", "create", "edit", "export"],
+      tenants: ["view", "create", "edit"],
+      contracts: ["view", "create", "edit", "approve"],
+      maintenance: ["view", "create", "edit", "approve"],
+      tasks: ["view", "create", "edit", "approve"],
+      expenses: ["view", "create", "approve"],
+      reports: ["view", "export"],
+      documents: ["view", "create"],
+      archive: ["view", "create"]
+    };
+  }
+  if (role === "leasing") {
+    return {
+      dashboard: ["view"],
+      properties: ["view", "edit"],
+      units: ["view", "create", "edit"],
+      tenants: ["view", "create", "edit", "export"],
+      contracts: ["view", "create", "edit", "export"],
+      tasks: ["view", "create"],
+      documents: ["view", "create"],
+      archive: ["view"]
+    };
+  }
+  if (role === "maint_manager") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      maintenance: ["view", "create", "edit", "approve", "manage"],
+      tasks: ["view", "create", "edit", "approve", "manage"],
+      expenses: ["view", "create", "approve"],
+      documents: ["view", "create"],
+      reports: ["view"]
+    };
+  }
+  if (role === "technician") {
+    return {
+      dashboard: ["view"],
+      units: ["view"],
+      maintenance: ["view", "create", "edit"],
+      tasks: ["view", "create", "edit"],
+      expenses: ["view", "create"]
+    };
+  }
+  if (role === "receptionist") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      tenants: ["view", "create", "edit"],
+      tasks: ["view", "create"],
+      documents: ["view", "create"],
+      maintenance: ["view", "create"]
+    };
+  }
+  if (role === "owner") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      tenants: ["view"],
+      contracts: ["view"],
+      payments: ["view"],
+      finance: ["view"],
+      receipts: ["view"],
+      reports: ["view", "export"],
+      documents: ["view"],
+      archive: ["view"]
+    };
+  }
+  return { dashboard: ["view"] };
+}
+function buildAllDefaultRoleModulePermissions() {
+  const out = {};
+  for (const r of ROLE_TEMPLATES) {
+    out[r.key] = getDefaultModulePermissionsForRole(r.key);
+  }
+  return out;
+}
+function mergeModulePermissions(base, overlay) {
+  if (!overlay) return { ...base };
+  const merged = {};
+  for (const m of RBAC_MODULES) {
+    const key = m.key;
+    if (overlay[key] !== void 0) {
+      merged[key] = Array.from(new Set(overlay[key] || []));
+    } else if (base[key] !== void 0) {
+      merged[key] = Array.from(new Set(base[key] || []));
+    }
+  }
+  return merged;
+}
+function deriveLegacyPermissionsFromModules(modulePerms) {
+  const set = /* @__PURE__ */ new Set();
+  const hasAny = (mod, actions) => {
+    const list = modulePerms[mod] || [];
+    return list.includes("manage") || actions.some((a) => list.includes(a));
+  };
+  if (hasAny("properties", ["create", "edit", "delete_void", "manage"]) || hasAny("units", ["create", "edit", "manage"])) {
+    set.add("manage_properties");
+  }
+  if (hasAny("tenants", ["create", "edit", "delete_void", "manage"])) {
+    set.add("manage_tenants");
+  }
+  if (hasAny("contracts", ["create", "edit", "approve", "manage"])) {
+    set.add("manage_contracts");
+  }
+  if (hasAny("payments", ["create", "edit", "manage"])) {
+    set.add("collect_payments");
+  }
+  if (hasAny("receipts", ["delete_void", "approve", "manage"])) {
+    set.add("reverse_receipts");
+  }
+  if (hasAny("finance", ["create", "edit", "approve", "manage"])) {
+    set.add("manage_accounting");
+  }
+  if (hasAny("expenses", ["create"])) {
+    set.add("create_expense");
+  }
+  if (hasAny("expenses", ["approve"])) {
+    set.add("approve_expense_supervisor");
+  }
+  if (hasAny("expenses", ["manage"])) {
+    set.add("approve_expense_manager");
+  }
+  if (hasAny("maintenance", ["manage", "approve"])) {
+    set.add("manage_maintenance");
+  }
+  if (hasAny("maintenance", ["create", "edit"])) {
+    set.add("execute_maintenance");
+  }
+  if (hasAny("tasks", ["create", "edit", "approve", "manage"])) {
+    set.add("manage_tasks");
+  }
+  if (hasAny("documents", ["create", "edit", "delete_void", "manage"])) {
+    set.add("manage_documents");
+  }
+  if (hasAny("team", ["create", "edit", "delete_void", "manage"]) || hasAny("settings", ["manage"])) {
+    set.add("manage_users");
+  }
+  if (hasAny("backups", ["create", "manage", "approve"])) {
+    set.add("backup_restore");
+  }
+  if (hasAny("audit", ["view", "export", "manage"])) {
+    set.add("view_audit");
+  }
+  if (hasAny("reports", ["view"]) && hasAny("finance", ["view"])) {
+    set.add("view_all");
+  }
+  return Array.from(set);
+}
+function getEffectiveModulePermissions(state, user) {
+  if (!user) return {};
+  const customRole = user.customRoleId ? state?.customRoles?.find((r) => r.id === user.customRoleId) : void 0;
+  const baseTemplate = customRole ? customRole.modulePermissions : state?.roleModulePermissions?.[user.role] || getDefaultModulePermissionsForRole(user.role);
+  const effective = mergeModulePermissions(baseTemplate, user.customModulePermissions);
+  const legacyList = customRole ? customRole.legacyPermissions : state?.rolePermissions?.[user.role] || [];
+  const ensureLegacy = (perm, mod, actions) => {
+    if (!legacyList.includes(perm)) return;
+    if (user.customModulePermissions && user.customModulePermissions[mod] !== void 0) return;
+    const cur = new Set(effective[mod] || []);
+    for (const a of actions) cur.add(a);
+    effective[mod] = Array.from(cur);
+  };
+  ensureLegacy("manage_properties", "properties", ["view", "create", "edit"]);
+  ensureLegacy("manage_properties", "units", ["view", "create", "edit"]);
+  ensureLegacy("manage_tenants", "tenants", ["view", "create", "edit"]);
+  ensureLegacy("manage_contracts", "contracts", ["view", "create", "edit"]);
+  ensureLegacy("collect_payments", "payments", ["view", "create"]);
+  ensureLegacy("collect_payments", "receipts", ["view", "create"]);
+  ensureLegacy("reverse_receipts", "receipts", ["view", "delete_void"]);
+  ensureLegacy("manage_accounting", "finance", ["view", "create", "edit"]);
+  ensureLegacy("create_expense", "expenses", ["view", "create"]);
+  ensureLegacy("approve_expense_supervisor", "expenses", ["view", "approve"]);
+  ensureLegacy("approve_expense_manager", "expenses", ["view", "approve", "manage"]);
+  ensureLegacy("manage_maintenance", "maintenance", ["view", "create", "edit", "approve", "manage"]);
+  ensureLegacy("execute_maintenance", "maintenance", ["view", "edit"]);
+  ensureLegacy("manage_tasks", "tasks", ["view", "create", "edit"]);
+  ensureLegacy("manage_documents", "documents", ["view", "create", "edit"]);
+  ensureLegacy("manage_users", "team", ["view", "create", "edit", "delete_void", "manage"]);
+  ensureLegacy("backup_restore", "backups", ["view", "create", "approve", "manage"]);
+  ensureLegacy("view_audit", "audit", ["view", "export"]);
+  return effective;
+}
+function userHasModuleAction(state, user, module, action = "view") {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") return false;
+  if (user.role === "sys_owner" && !user.customModulePermissions && !user.customRoleId) {
+    return true;
+  }
+  const effective = getEffectiveModulePermissions(state, user);
+  const actions = effective[module] || [];
+  if (actions.includes("manage")) return true;
+  return actions.includes(action);
+}
+function userHasLegacyPermission(state, user, permission) {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") return false;
+  if (user.customRoleId) {
+    const customRole = state?.customRoles?.find((r) => r.id === user.customRoleId);
+    if (customRole) {
+      const derived = deriveLegacyPermissionsFromModules(
+        getEffectiveModulePermissions(state, user)
+      );
+      return customRole.legacyPermissions.includes(permission) || derived.includes(permission);
+    }
+  }
+  if (user.customModulePermissions) {
+    const derived = deriveLegacyPermissionsFromModules(
+      getEffectiveModulePermissions(state, user)
+    );
+    if (derived.includes(permission)) return true;
+  }
+  const perms = state?.rolePermissions?.[user.role] || [];
+  return perms.includes(permission);
+}
+var ALL_PROPERTIES_SCOPE = "*";
+var ROLE_PRIORITY_RANK = {
+  owner: 0,
+  technician: 1,
+  receptionist: 1,
+  leasing: 2,
+  auditor: 2,
+  maint_manager: 3,
+  accountant: 3,
+  supervisor: 4,
+  gm: 5,
+  sys_owner: 6
+};
+function isRoleDowngrade(oldRole, newRole) {
+  return (ROLE_PRIORITY_RANK[newRole] ?? 0) < (ROLE_PRIORITY_RANK[oldRole] ?? 0);
+}
+function isUserAccountActive(user) {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") return false;
+  return true;
+}
+function canUserAccessCompany(state, user, companyId) {
+  if (!isUserAccountActive(user) || !user) return false;
+  if (user.role === "sys_owner") return true;
+  if (!user.companyId) return true;
+  if (!companyId) return true;
+  if ((state?.companies?.length || 0) <= 1 && !companyId) return true;
+  return user.companyId === companyId;
+}
+function getUserPropertyScope(state, user) {
+  if (!isUserAccountActive(user) || !user) return /* @__PURE__ */ new Set();
+  const allProperties = state?.properties || [];
+  const withinCompany = (propId) => {
+    const prop = allProperties.find((p) => p.id === propId);
+    if (!prop) return false;
+    return canUserAccessCompany(state, user, prop.companyId);
+  };
+  if (user.role === "owner") {
+    if (!user.ownerId) return /* @__PURE__ */ new Set();
+    const owned = /* @__PURE__ */ new Set();
+    for (const p of allProperties) {
+      if (Array.isArray(p.ownerShares) && p.ownerShares.some((s) => s.ownerId === user.ownerId) && canUserAccessCompany(state, user, p.companyId)) {
+        owned.add(p.id);
+      }
+    }
+    for (const s of state?.ownerShares || []) {
+      if (s.ownerId === user.ownerId && withinCompany(s.propertyId)) {
+        owned.add(s.propertyId);
+      }
+    }
+    return owned;
+  }
+  if (user.role === "sys_owner") {
+    return "ALL";
+  }
+  const companyRestricted = Boolean(user.companyId && (state?.companies?.length || 0) > 0);
+  const rawAllowed = user.allowedPropertyIds;
+  if (user.role === "gm") {
+    if (rawAllowed === void 0 || Array.isArray(rawAllowed) && rawAllowed.includes(ALL_PROPERTIES_SCOPE)) {
+      if (!companyRestricted) return "ALL";
+      return new Set(allProperties.filter((p) => canUserAccessCompany(state, user, p.companyId)).map((p) => p.id));
+    }
+    return new Set(rawAllowed.filter((id) => id !== ALL_PROPERTIES_SCOPE && withinCompany(id)));
+  }
+  if (!Array.isArray(rawAllowed) || rawAllowed.length === 0) {
+    return /* @__PURE__ */ new Set();
+  }
+  if (rawAllowed.includes(ALL_PROPERTIES_SCOPE)) {
+    if (!companyRestricted) return "ALL";
+    return new Set(allProperties.filter((p) => canUserAccessCompany(state, user, p.companyId)).map((p) => p.id));
+  }
+  return new Set(rawAllowed.filter((id) => id !== ALL_PROPERTIES_SCOPE && withinCompany(id)));
+}
+function getAccessiblePropertyIdsSet(state, user) {
+  const scope = getUserPropertyScope(state, user);
+  if (scope === "ALL") {
+    return new Set((state?.properties || []).map((p) => p.id));
+  }
+  return scope;
+}
+function userHasAllPropertiesAccess(state, user) {
+  if (!isUserAccountActive(user) || !user) return false;
+  if (user.role === "sys_owner") return true;
+  if (user.role === "owner") return false;
+  const scope = getUserPropertyScope(state, user);
+  if (scope === "ALL") return true;
+  if (user.companyId && Array.isArray(user.allowedPropertyIds) && user.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE)) {
+    return true;
+  }
+  if (user.role === "gm" && user.allowedPropertyIds === void 0) return true;
+  return false;
+}
+function canUserAccessProperty(state, user, propertyId) {
+  if (!isUserAccountActive(user) || !user || !propertyId) return false;
+  const scope = getUserPropertyScope(state, user);
+  if (scope === "ALL") {
+    const prop = (state?.properties || []).find((p) => p.id === propertyId);
+    if (prop) return canUserAccessCompany(state, user, prop.companyId);
+    return true;
+  }
+  return scope.has(propertyId);
+}
+function isPropertyScopeShrink(oldState, oldUser, newState, newUser) {
+  const oldScope = getUserPropertyScope(oldState, oldUser);
+  const newScope = getUserPropertyScope(newState, newUser);
+  if (newScope === "ALL") return false;
+  if (oldScope === "ALL") {
+    const allIds = (oldState?.properties || []).map((p) => p.id);
+    if (allIds.length === 0) {
+      return !Array.isArray(newUser.allowedPropertyIds) || !newUser.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE);
+    }
+    return allIds.some((id) => !newScope.has(id));
+  }
+  for (const prevId of oldScope) {
+    if (!newScope.has(prevId)) return true;
+  }
+  if (Array.isArray(oldUser.allowedPropertyIds) && oldUser.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE) && (!Array.isArray(newUser.allowedPropertyIds) || !newUser.allowedPropertyIds.includes(ALL_PROPERTIES_SCOPE))) {
+    return true;
+  }
+  return false;
+}
+function sanitizeUserForClient(u) {
+  return {
+    id: u.id,
+    companyId: u.companyId,
+    nameAr: u.nameAr,
+    nameEn: u.nameEn,
+    username: u.username,
+    role: u.role,
+    customRoleId: u.customRoleId,
+    jobTitle: u.jobTitle,
+    department: u.department,
+    roleLabelAr: u.roleLabelAr,
+    roleLabelEn: u.roleLabelEn,
+    email: u.email,
+    phone: u.phone,
+    approvalLimitSar: u.approvalLimitSar,
+    active: u.active,
+    accountStatus: u.accountStatus || (u.active ? "\u0646\u0634\u0637" : "\u0645\u0648\u0642\u0648\u0641"),
+    allowedPropertyIds: Array.isArray(u.allowedPropertyIds) ? [...u.allowedPropertyIds] : void 0,
+    customModulePermissions: u.customModulePermissions ? { ...u.customModulePermissions } : void 0,
+    ownerId: u.ownerId,
+    deviceName: u.deviceName,
+    lastActiveAt: u.lastActiveAt,
+    statusState: u.statusState,
+    specialty: u.specialty,
+    managerRating: u.managerRating,
+    lastActivitySummary: u.lastActivitySummary,
+    security: u.security ? {
+      ...u.security,
+      trustedDevices: u.security.trustedDevices ? [...u.security.trustedDevices] : void 0
+    } : void 0,
+    notificationPrefs: u.notificationPrefs ? { ...u.notificationPrefs } : void 0,
+    invitedBy: u.invitedBy,
+    invitedAt: u.invitedAt,
+    inviteStatus: u.inviteStatus,
+    terminatedAt: u.terminatedAt,
+    terminationReason: u.terminationReason,
+    verifiedEmail: u.verifiedEmail,
+    verifiedPhone: u.verifiedPhone,
+    online: u.online
+  };
+}
+function filterStateForUser(state, user, options) {
+  if (!user || !isUserAccountActive(user)) {
+    return {
+      ...state,
+      properties: [],
+      units: [],
+      tenants: [],
+      leads: [],
+      leadEscalations: [],
+      contracts: [],
+      handovers: [],
+      installments: [],
+      payments: [],
+      expenses: [],
+      supplierInvoices: [],
+      propertyBudgets: [],
+      tickets: [],
+      tasks: [],
+      meterReadings: [],
+      documents: [],
+      owners: [],
+      ownerShares: [],
+      ownerTransfers: [],
+      purchaseOrders: [],
+      decisions: [],
+      zatcaInvoices: [],
+      communications: [],
+      notifications: [],
+      auditLogs: [],
+      backups: [],
+      loginHistory: [],
+      employeeInvitations: [],
+      users: []
+    };
+  }
+  const hasAllProps = userHasAllPropertiesAccess(state, user);
+  const allowedPropIds = getAccessiblePropertyIdsSet(state, user);
+  const canAudit = userHasLegacyPermission(state, user, "view_audit") || userHasModuleAction(state, user, "audit", "view");
+  const canBackup = userHasLegacyPermission(state, user, "backup_restore") || userHasModuleAction(state, user, "backups", "view");
+  const canTeam = userHasLegacyPermission(state, user, "manage_users") || userHasModuleAction(state, user, "team", "view");
+  const properties = (state.properties || []).filter((p) => allowedPropIds.has(p.id));
+  const units = (state.units || []).filter((u) => allowedPropIds.has(u.propertyId));
+  const unitIds = new Set(units.map((u) => u.id));
+  const contracts = (state.contracts || []).filter((c) => allowedPropIds.has(c.propertyId));
+  const contractIds = new Set(contracts.map((c) => c.id));
+  const handovers = (state.handovers || []).filter((h) => allowedPropIds.has(h.propertyId));
+  const handoverIds = new Set(handovers.map((h) => h.id));
+  const installments = (state.installments || []).filter((i) => contractIds.has(i.contractId));
+  const payments = (state.payments || []).filter((p) => contractIds.has(p.contractId));
+  const expenses = (state.expenses || []).filter((e) => allowedPropIds.has(e.propertyId));
+  const expenseIds = new Set(expenses.map((e) => e.id));
+  const supplierInvoices = (state.supplierInvoices || []).filter(
+    (inv) => inv.propertyId ? allowedPropIds.has(inv.propertyId) : hasAllProps
+  );
+  const propertyBudgets = (state.propertyBudgets || []).filter((b) => allowedPropIds.has(b.propertyId));
+  const tickets = (state.tickets || []).filter((t) => allowedPropIds.has(t.propertyId));
+  const ticketIds = new Set(tickets.map((t) => t.id));
+  const tasks = (state.tasks || []).filter(
+    (t) => t.propertyId ? allowedPropIds.has(t.propertyId) : hasAllProps || t.assignedTo === user.id
+  );
+  const leads = (state.leads || []).filter(
+    (l) => l.propertyId ? allowedPropIds.has(l.propertyId) : hasAllProps || l.assignedTo === user.id
+  );
+  const leadIds = new Set(leads.map((l) => l.id));
+  const leadEscalations = (state.leadEscalations || []).filter((e) => leadIds.has(e.leadId));
+  const meterReadings = (state.meterReadings || []).filter((m) => allowedPropIds.has(m.propertyId));
+  const tenantAllLinkedPropIds = /* @__PURE__ */ new Map();
+  const addTenantLink = (tenantId, propertyId) => {
+    if (!tenantId || !propertyId) return;
+    let set = tenantAllLinkedPropIds.get(tenantId);
+    if (!set) {
+      set = /* @__PURE__ */ new Set();
+      tenantAllLinkedPropIds.set(tenantId, set);
+    }
+    set.add(propertyId);
+  };
+  for (const c of state.contracts || []) addTenantLink(c.tenantId, c.propertyId);
+  for (const u of state.units || []) {
+    const linkedTid = u.currentTenantId || u.linkedTenantId;
+    if (linkedTid) addTenantLink(linkedTid, u.propertyId);
+  }
+  for (const l of state.leads || []) {
+    const linkedTid = l.convertedToTenantId || l.convertedTenantId;
+    if (linkedTid && l.propertyId) addTenantLink(linkedTid, l.propertyId);
+  }
+  const tenants = (state.tenants || []).filter((t) => {
+    if (user.role === "owner") {
+      return contracts.some((c) => c.tenantId === t.id);
+    }
+    const linkedProps = tenantAllLinkedPropIds.get(t.id);
+    if (linkedProps && linkedProps.size > 0) {
+      for (const pid of linkedProps) {
+        if (allowedPropIds.has(pid)) return true;
+      }
+      return false;
+    }
+    if (hasAllProps) {
+      return canUserAccessCompany(state, user, t.companyId);
+    }
+    return allowedPropIds.size > 0;
+  });
+  const tenantIds = new Set(tenants.map((t) => t.id));
+  const ownerShares = user.role === "owner" ? (state.ownerShares || []).filter((s) => s.ownerId === user.ownerId && allowedPropIds.has(s.propertyId)) : (state.ownerShares || []).filter((s) => allowedPropIds.has(s.propertyId));
+  const visibleOwnerIds = new Set(ownerShares.map((s) => s.ownerId));
+  for (const p of properties) {
+    for (const s of p.ownerShares || []) {
+      if (user.role !== "owner" || s.ownerId === user.ownerId) {
+        visibleOwnerIds.add(s.ownerId);
+      }
+    }
+  }
+  const owners = user.role === "owner" ? (state.owners || []).filter((o) => o.id === user.ownerId) : (state.owners || []).filter((o) => visibleOwnerIds.has(o.id) || hasAllProps);
+  const allowedOwnerIds = new Set(owners.map((o) => o.id));
+  const ownerTransfers = (state.ownerTransfers || []).filter((tr) => allowedOwnerIds.has(tr.ownerId));
+  const purchaseOrders = (state.purchaseOrders || []).filter(
+    (po) => po.propertyId ? allowedPropIds.has(po.propertyId) : hasAllProps
+  );
+  const decisions = (state.decisions || []).filter(
+    (d) => d.propertyId ? allowedPropIds.has(d.propertyId) : hasAllProps
+  );
+  const zatcaInvoices = (state.zatcaInvoices || []).filter((z) => {
+    if (z.contractId) return contractIds.has(z.contractId);
+    if (z.propertyId) return allowedPropIds.has(z.propertyId);
+    return hasAllProps;
+  });
+  const communications = (state.communications || []).filter(
+    (c) => c.tenantId ? tenantIds.has(c.tenantId) : hasAllProps
+  );
+  const documents = (state.documents || []).filter((doc) => {
+    if (doc.propertyId) return allowedPropIds.has(doc.propertyId);
+    const relType = doc.relatedEntityType || doc.relatedType;
+    const relId = doc.relatedEntityId || doc.relatedId;
+    if ((relType === "Property" || relType === "\u0639\u0642\u0627\u0631") && relId) return allowedPropIds.has(relId);
+    if ((relType === "Unit" || relType === "\u0648\u062D\u062F\u0629") && relId) return unitIds.has(relId);
+    if ((relType === "Contract" || relType === "\u0639\u0642\u062F") && relId) return contractIds.has(relId);
+    if ((relType === "Tenant" || relType === "\u0645\u0633\u062A\u0623\u062C\u0631") && relId) return tenantIds.has(relId);
+    if (relType === "Ticket" && relId) return ticketIds.has(relId);
+    if (relType === "Expense" && relId) return expenseIds.has(relId);
+    if (relType === "Handover" && relId) return handoverIds.has(relId);
+    if (relType === "Owner" && relId) return allowedOwnerIds.has(relId);
+    if (relType === "\u0634\u0631\u0643\u0629") return hasAllProps;
+    return hasAllProps;
+  });
+  const companies = user.role === "sys_owner" || !user.companyId ? state.companies || [] : (state.companies || []).filter((c) => c.id === user.companyId);
+  const notifications = (state.notifications || []).filter((n) => {
+    if (!n.targetRoles.includes(user.role) && user.role !== "sys_owner") return false;
+    if (n.propertyId) return allowedPropIds.has(n.propertyId);
+    return true;
+  });
+  const sanitizedUsers = (state.users || []).filter((u) => {
+    if (user.role === "owner") return u.id === user.id;
+    if (user.role === "sys_owner") return true;
+    if (user.companyId && u.companyId && user.companyId !== u.companyId) return false;
+    return true;
+  }).map((u) => {
+    if (u.id === user.id || canTeam || canAudit) {
+      return sanitizeUserForClient(u);
+    }
+    return {
+      id: u.id,
+      companyId: u.companyId,
+      nameAr: u.nameAr,
+      nameEn: u.nameEn,
+      role: u.role,
+      jobTitle: u.jobTitle,
+      department: u.department,
+      roleLabelAr: u.roleLabelAr,
+      roleLabelEn: u.roleLabelEn,
+      email: "",
+      phone: "",
+      approvalLimitSar: 0,
+      active: u.active,
+      accountStatus: u.accountStatus || (u.active ? "\u0646\u0634\u0637" : "\u0645\u0648\u0642\u0648\u0641"),
+      lastActiveAt: u.lastActiveAt,
+      statusState: u.statusState,
+      specialty: u.specialty,
+      online: u.online
+    };
+  });
+  return {
+    ...state,
+    meta: {
+      ...state.meta,
+      ...options?.workspaceId ? { workspaceId: options.workspaceId } : {}
+    },
+    companies,
+    properties,
+    units,
+    tenants,
+    leads,
+    leadEscalations,
+    contracts,
+    handovers,
+    installments,
+    payments,
+    expenses,
+    supplierInvoices,
+    propertyBudgets,
+    tickets,
+    tasks,
+    meterReadings,
+    documents,
+    owners,
+    ownerShares,
+    ownerTransfers,
+    purchaseOrders,
+    decisions,
+    zatcaInvoices,
+    communications,
+    notifications,
+    auditLogs: canAudit ? state.auditLogs : [],
+    backups: canBackup ? state.backups : [],
+    loginHistory: canAudit || canTeam ? state.loginHistory || [] : [],
+    employeeInvitations: canTeam ? state.employeeInvitations || [] : [],
+    users: sanitizedUsers
+  };
+}
+function getNavRequiredModules(nav) {
+  switch (nav) {
+    case "dashboard":
+      return ["dashboard"];
+    case "daily_hub":
+      return ["tasks", "dashboard"];
+    case "properties":
+      return ["properties", "units"];
+    case "leasing_finance":
+    case "leasing":
+    case "finance":
+    case "accounting":
+      return ["contracts", "payments", "finance", "receipts", "expenses"];
+    case "tenants":
+      return ["tenants"];
+    case "maintenance":
+      return ["maintenance", "tasks"];
+    case "reports":
+    case "admin":
+      return ["reports", "audit"];
+    case "team":
+      return ["team"];
+    case "documents":
+      return ["documents"];
+    case "archive":
+      return ["archive"];
+    case "templates":
+      return ["tenants", "contracts", "settings"];
+    case "settings":
+      return ["settings", "backups"];
+    case "about":
+    case "profile":
+      return ["dashboard"];
+    default:
+      return ["dashboard"];
+  }
+}
+function userCanAccessNav(state, user, nav) {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") return false;
+  if (nav === "profile" || nav === "about" || nav === "dashboard") return true;
+  if (user.role === "owner") {
+    const ownerAllowed = /* @__PURE__ */ new Set(["dashboard", "properties", "leasing_finance", "tenants", "reports", "documents", "archive", "profile", "about"]);
+    return ownerAllowed.has(nav);
+  }
+  const modules = getNavRequiredModules(nav);
+  return modules.some((m) => userHasModuleAction(state, user, m, "view"));
+}
+function getRecommendedLandingNav(state, user) {
+  if (!user || !user.active || user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") {
+    return { nav: "dashboard" };
+  }
+  if (user.role === "accountant" && userCanAccessNav(state, user, "leasing_finance")) {
+    return { nav: "leasing_finance", leasingFinanceTab: "finance" };
+  }
+  if ((user.role === "maint_manager" || user.role === "technician") && userCanAccessNav(state, user, "maintenance")) {
+    return { nav: "maintenance" };
+  }
+  if (user.role === "leasing" && userCanAccessNav(state, user, "tenants")) {
+    return { nav: "tenants" };
+  }
+  if (user.role === "supervisor" && userCanAccessNav(state, user, "properties")) {
+    return { nav: "properties" };
+  }
+  if (user.role === "receptionist" && userCanAccessNav(state, user, "daily_hub")) {
+    return { nav: "daily_hub" };
+  }
+  return { nav: "dashboard" };
+}
+function getAllowedNavsForUser(state, user) {
+  const allNavs = [
+    "dashboard",
+    "daily_hub",
+    "properties",
+    "leasing_finance",
+    "tenants",
+    "maintenance",
+    "reports",
+    "team",
+    "documents",
+    "archive",
+    "templates",
+    "settings",
+    "profile",
+    "about"
+  ];
+  return allNavs.filter((n) => userCanAccessNav(state, user, n));
+}
+
 // worker/src/cryptoWeb.ts
 var encoder = new TextEncoder();
 var decoder = new TextDecoder();
@@ -3126,13 +3955,87 @@ async function decryptBackupWeb(envelope, password) {
 }
 
 // worker/src/workspaceDo.ts
+var WorkerPermissionDeniedError = class extends Error {
+  statusCode = 403;
+  constructor(message) {
+    super(message);
+    this.name = "WorkerPermissionDeniedError";
+  }
+};
 var SESSION_COOKIE_NAME = "aqar_session";
+var REFRESH_COOKIE_NAME = "aqar_refresh";
 var SESSION_TTL_MS = 1e3 * 60 * 60 * 24 * 7;
+var ACCESS_TOKEN_TTL_MS = 1e3 * 60 * 60 * 4;
+var SESSION_SHORT_TTL_MS = 1e3 * 60 * 60 * 8;
+var MAX_FAILED_LOGIN_ATTEMPTS = 5;
+var LOCKOUT_DURATION_MS = 5 * 60 * 1e3;
+var ARRAY_COLLECTIONS = [
+  "companies",
+  "users",
+  "customRoles",
+  "employeeInvitations",
+  "properties",
+  "units",
+  "meterReadings",
+  "owners",
+  "ownerShares",
+  "ownerTransfers",
+  "vendors",
+  "tenants",
+  "leads",
+  "leadEscalations",
+  "contracts",
+  "handovers",
+  "installments",
+  "payments",
+  "accounts",
+  "journals",
+  "expenses",
+  "supplierInvoices",
+  "recurringExpenses",
+  "propertyBudgets",
+  "assets",
+  "tickets",
+  "tasks",
+  "communications",
+  "documents",
+  "purchaseOrders",
+  "decisions",
+  "notifications",
+  "reminderRules",
+  "reminderLogs",
+  "auditLogs",
+  "backups",
+  "savedArchiveFilters",
+  "loginHistory",
+  "syncConflicts",
+  "scheduledReports",
+  "favoriteReports",
+  "sharedSearchFilters",
+  "zatcaInvoices",
+  "communicationTemplates"
+];
+var SINGLETON_KEYS = [
+  "settings",
+  "rolePermissions",
+  "roleModulePermissions",
+  "counters",
+  "processedIdempotencyKeys",
+  "archiveLastNightlyRun",
+  "archiveSeeded",
+  "securityPolicy",
+  "teamSeeded",
+  "syncRevision",
+  "entityRevisions",
+  "lastUpdatedAt"
+];
 var PUBLIC_PATHS = /* @__PURE__ */ new Set([
   "/api/health",
+  "/api/workspaces/provision",
   "/api/auth/session",
   "/api/auth/login",
   "/api/auth/login-pin",
+  "/api/auth/refresh",
   "/api/auth/logout",
   "/api/public/prospect-context",
   "/api/public/leads"
@@ -3140,14 +4043,29 @@ var PUBLIC_PATHS = /* @__PURE__ */ new Set([
 function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
+async function sha256HexWeb(input) {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function randomHexWeb(byteLength = 32) {
+  const buf = crypto.getRandomValues(new Uint8Array(byteLength));
+  return Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 function jsonResponse(body, status = 200, extraHeaders) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      ...extraHeaders || {}
-    }
-  });
+  const headers = new Headers(extraHeaders);
+  headers.set("Content-Type", "application/json; charset=utf-8");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "SAMEORIGIN");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  return new Response(JSON.stringify(body), { status, headers });
+}
+function errorResponse(err, defaultStatus = 400) {
+  if (err instanceof WorkerPermissionDeniedError) {
+    return jsonResponse({ error: err.message, code: "FORBIDDEN" }, 403);
+  }
+  const msg = err?.message || "\u062A\u0639\u0630\u0631 \u062A\u0646\u0641\u064A\u0630 \u0627\u0644\u0637\u0644\u0628";
+  return jsonResponse({ error: msg }, defaultStatus);
 }
 function parseCookies(header) {
   const out = {};
@@ -3165,8 +4083,24 @@ function parseCookies(header) {
   }
   return out;
 }
+function isSecureRequest(req) {
+  try {
+    const fwd = req.headers.get("x-forwarded-proto");
+    if (fwd && fwd.split(",")[0].trim().toLowerCase() === "https") return true;
+    return new URL(req.url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 function normalizePhone(raw) {
-  return raw.replace(/[^\d]/g, "").slice(-9);
+  return (raw || "").replace(/[^\d]/g, "").slice(-9);
+}
+function resolveRequestWorkspace(request) {
+  const hdr = (request.headers.get("x-resolved-workspace-id") || request.headers.get("x-workspace-id") || "").trim().toLowerCase();
+  if (hdr && /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(hdr)) {
+    return hdr;
+  }
+  return "default";
 }
 var AqarWorkspaceDO = class extends DurableObject {
   stateCache = null;
@@ -3183,85 +4117,238 @@ var AqarWorkspaceDO = class extends DurableObject {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS entities (
+        collection TEXT NOT NULL,
+        id TEXT NOT NULL,
+        company_id TEXT NOT NULL DEFAULT 'default',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (collection, id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_do_entities_col ON entities (collection, sort_order);
+      CREATE INDEX IF NOT EXISTS idx_do_entities_comp ON entities (company_id, collection);
+
       CREATE TABLE IF NOT EXISTS state_snapshots (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         sync_revision INTEGER NOT NULL,
         updated_at TEXT NOT NULL,
         state_json TEXT NOT NULL
       );
+
       CREATE TABLE IF NOT EXISTS user_credentials (
         user_id TEXT PRIMARY KEY,
         password_hash TEXT NOT NULL,
-        pin_hash TEXT NOT NULL,
+        pin_hash TEXT,
+        failed_attempts INTEGER NOT NULL DEFAULT 0,
+        locked_until TEXT,
         updated_at TEXT NOT NULL
       );
+
       CREATE TABLE IF NOT EXISTS sessions (
         token_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL DEFAULT 'default',
         device_name TEXT NOT NULL,
+        app_type TEXT NOT NULL DEFAULT 'web',
+        remember_me INTEGER NOT NULL DEFAULT 1,
+        refresh_token_hash TEXT,
+        refresh_expires_at TEXT,
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         revoked INTEGER NOT NULL DEFAULT 0
       );
+
       CREATE TABLE IF NOT EXISTS operations_log (
         operation_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         method TEXT NOT NULL,
         endpoint TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id TEXT,
         status TEXT NOT NULL,
         response_json TEXT,
         processed_at TEXT NOT NULL
       );
+
       CREATE TABLE IF NOT EXISTS backups_store (
         id TEXT PRIMARY KEY,
         payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
     `);
+    const alterCols = [
+      "ALTER TABLE user_credentials ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE user_credentials ADD COLUMN locked_until TEXT",
+      "ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+      "ALTER TABLE sessions ADD COLUMN app_type TEXT NOT NULL DEFAULT 'web'",
+      "ALTER TABLE sessions ADD COLUMN remember_me INTEGER NOT NULL DEFAULT 1",
+      "ALTER TABLE sessions ADD COLUMN refresh_token_hash TEXT",
+      "ALTER TABLE sessions ADD COLUMN refresh_expires_at TEXT"
+    ];
+    for (const stmt of alterCols) {
+      try {
+        sql.exec(stmt);
+      } catch {
+      }
+    }
   }
-  async ensureBootstrapped() {
+  normalizeLoadedState(rawState, workspaceId) {
+    const base = createInitialSeed();
+    const defCompanyId = (rawState.companies || base.companies || [])[0]?.id || `comp-${workspaceId}`;
+    const mergedRolePermissions = {
+      ...DEFAULT_ROLE_PERMISSIONS,
+      ...rawState.rolePermissions || {}
+    };
+    const mergedRoleModulePermissions = {
+      ...buildAllDefaultRoleModulePermissions(),
+      ...rawState.roleModulePermissions || {}
+    };
+    const users = (rawState.users || []).map((u) => ({
+      ...u,
+      companyId: u.role === "sys_owner" ? u.companyId : u.companyId || defCompanyId,
+      accountStatus: u.accountStatus || (u.active ? "\u0646\u0634\u0637" : "\u0645\u0648\u0642\u0648\u0641")
+    }));
+    return {
+      ...base,
+      ...rawState,
+      users,
+      customRoles: Array.isArray(rawState.customRoles) ? rawState.customRoles : [],
+      employeeInvitations: Array.isArray(rawState.employeeInvitations) ? rawState.employeeInvitations : [],
+      rolePermissions: mergedRolePermissions,
+      roleModulePermissions: mergedRoleModulePermissions,
+      entityRevisions: rawState.entityRevisions || {}
+    };
+  }
+  loadNormalizedState(workspaceId) {
+    const sql = this.ctx.storage.sql;
+    const settingsRow = sql.exec("SELECT value FROM kv_meta WHERE key = 'singleton:settings'").toArray()[0];
+    if (!settingsRow) return null;
+    const base = createInitialSeed();
+    const out = { ...base };
+    const metaRows = sql.exec("SELECT key, value FROM kv_meta WHERE key LIKE 'singleton:%'").toArray();
+    for (const row of metaRows) {
+      const k = row.key.slice("singleton:".length);
+      try {
+        out[k] = JSON.parse(row.value);
+      } catch {
+        out[k] = row.value;
+      }
+    }
+    for (const col of ARRAY_COLLECTIONS) {
+      const rows = sql.exec("SELECT data FROM entities WHERE collection = ? ORDER BY sort_order ASC", String(col)).toArray();
+      if (rows.length > 0 || col === "customRoles" || col === "employeeInvitations") {
+        out[String(col)] = rows.map((r) => JSON.parse(r.data));
+      } else {
+        out[String(col)] = rows.map((r) => JSON.parse(r.data));
+      }
+    }
+    return this.normalizeLoadedState(out, workspaceId);
+  }
+  saveNormalizedState(state, workspaceId) {
+    const sql = this.ctx.storage.sql;
+    const now = state.lastUpdatedAt || (/* @__PURE__ */ new Date()).toISOString();
+    const revisions = state.entityRevisions || {};
+    this.ctx.storage.transactionSync(() => {
+      for (const key of SINGLETON_KEYS) {
+        const val = state[key];
+        if (val !== void 0) {
+          sql.exec("INSERT OR REPLACE INTO kv_meta (key, value) VALUES (?, ?)", `singleton:${String(key)}`, JSON.stringify(val));
+        }
+      }
+      for (const col of ARRAY_COLLECTIONS) {
+        const list = state[col] || [];
+        sql.exec("DELETE FROM entities WHERE collection = ?", String(col));
+        for (let idx = 0; idx < list.length; idx++) {
+          const item = list[idx];
+          const entityId = String(item?.id || `${String(col)}-${idx}`);
+          const companyId = String(item?.companyId || workspaceId || "default");
+          const revKey = `${String(col)}:${entityId}`;
+          const rev = revisions[revKey] || 1;
+          sql.exec(
+            "INSERT INTO entities (collection, id, company_id, sort_order, revision, updated_at, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            String(col),
+            entityId,
+            companyId,
+            idx,
+            rev,
+            now,
+            JSON.stringify(item)
+          );
+        }
+      }
+    });
+  }
+  async ensureBootstrapped(workspaceId) {
     if (this.initialized && this.stateCache) return this.stateCache;
     const sql = this.ctx.storage.sql;
-    const rows = sql.exec("SELECT state_json FROM state_snapshots WHERE id = 1").toArray();
-    if (rows.length > 0) {
-      this.stateCache = JSON.parse(rows[0].state_json);
+    const normalized = this.loadNormalizedState(workspaceId);
+    if (normalized) {
+      this.stateCache = normalized;
     } else {
-      const seed = createInitialSeed();
-      if (!seed.entityRevisions) seed.entityRevisions = {};
-      this.stateCache = seed;
-      sql.exec(
-        "INSERT OR REPLACE INTO state_snapshots (id, sync_revision, updated_at, state_json) VALUES (1, ?, ?, ?)",
-        seed.syncRevision || 1,
-        seed.lastUpdatedAt,
-        JSON.stringify(seed)
-      );
+      const legacyRows = sql.exec("SELECT state_json FROM state_snapshots WHERE id = 1").toArray();
+      if (legacyRows.length > 0) {
+        const parsed = this.normalizeLoadedState(JSON.parse(legacyRows[0].state_json), workspaceId);
+        this.stateCache = parsed;
+        this.saveNormalizedState(parsed, workspaceId);
+      } else if (workspaceId === "default") {
+        const seed = this.normalizeLoadedState(createInitialSeed(), workspaceId);
+        this.stateCache = seed;
+        this.saveNormalizedState(seed, workspaceId);
+      } else {
+        const emptySeed = this.createEmptyWorkspaceSeed(workspaceId);
+        this.stateCache = emptySeed;
+        this.saveNormalizedState(emptySeed, workspaceId);
+      }
     }
-    const existingCreds = new Set(
-      sql.exec("SELECT user_id FROM user_credentials").toArray().map((r) => r.user_id)
-    );
-    const defaultPwHash = await hashSecretWeb("Aqar@2026");
-    const defaultPinHash = await hashSecretWeb("1234");
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    for (const user of this.stateCache.users) {
-      if (!existingCreds.has(user.id)) {
+    const allowSeedDefaults = this.env.AQAR_ALLOW_SEED_DEFAULTS === "true" || this.env.AQAR_DEMO_LOGIN === "true";
+    const bootstrapPassword = (this.env.AQAR_BOOTSTRAP_ADMIN_PASSWORD || "").trim();
+    const bootstrapEmail = (this.env.AQAR_BOOTSTRAP_ADMIN_EMAIL || "").trim().toLowerCase();
+    const bootstrapPin = (this.env.AQAR_BOOTSTRAP_ADMIN_PIN || "").trim();
+    if (allowSeedDefaults) {
+      const existingCreds = new Set(
+        sql.exec("SELECT user_id FROM user_credentials").toArray().map((r) => r.user_id)
+      );
+      const defaultPwHash = await hashSecretWeb("Aqar@2026");
+      const defaultPinHash = await hashSecretWeb("1234");
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      for (const user of this.stateCache.users) {
+        if (!existingCreds.has(user.id)) {
+          sql.exec(
+            "INSERT INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)",
+            user.id,
+            defaultPwHash,
+            defaultPinHash,
+            now
+          );
+        }
+      }
+    } else if (bootstrapPassword.length >= 8) {
+      const existingCreds = new Set(
+        sql.exec("SELECT user_id FROM user_credentials").toArray().map((r) => r.user_id)
+      );
+      const targetAdmin = this.stateCache.users.find((u) => bootstrapEmail && u.email.toLowerCase() === bootstrapEmail) || this.stateCache.users.find((u) => u.role === "sys_owner");
+      if (targetAdmin && !existingCreds.has(targetAdmin.id)) {
+        const pwHash = await hashSecretWeb(bootstrapPassword);
+        const pinHash = /^\d{4,6}$/.test(bootstrapPin) ? await hashSecretWeb(bootstrapPin) : null;
         sql.exec(
-          "INSERT INTO user_credentials (user_id, password_hash, pin_hash, updated_at) VALUES (?, ?, ?, ?)",
-          user.id,
-          defaultPwHash,
-          defaultPinHash,
-          now
+          "INSERT INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)",
+          targetAdmin.id,
+          pwHash,
+          pinHash,
+          (/* @__PURE__ */ new Date()).toISOString()
         );
       }
     }
-    if (this.env.AQAR_SESSION_SECRET) {
+    if (this.env.AQAR_SESSION_SECRET && this.env.AQAR_SESSION_SECRET.length >= 16) {
       this.sessionSecretCache = this.env.AQAR_SESSION_SECRET;
     } else {
       const secretRow = sql.exec("SELECT value FROM kv_meta WHERE key = 'session_secret'").toArray();
       if (secretRow.length > 0) {
         this.sessionSecretCache = secretRow[0].value;
       } else {
-        const bytes = crypto.getRandomValues(new Uint8Array(32));
-        const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+        const hex = randomHexWeb(32);
         sql.exec("INSERT INTO kv_meta (key, value) VALUES ('session_secret', ?)", hex);
         this.sessionSecretCache = hex;
       }
@@ -3269,34 +4356,243 @@ var AqarWorkspaceDO = class extends DurableObject {
     this.initialized = true;
     return this.stateCache;
   }
-  persistState(state) {
+  createEmptyWorkspaceSeed(workspaceId, companyNameAr = "\u0645\u0646\u0634\u0623\u0629 \u0639\u0642\u0627\u0631\u064A\u0629 \u062C\u062F\u064A\u062F\u0629", companyNameEn = "New Real Estate Workspace") {
+    const base = createInitialSeed();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    return {
+      ...base,
+      settings: {
+        ...base.settings,
+        nameAr: companyNameAr,
+        nameEn: companyNameEn
+      },
+      companies: [
+        {
+          id: `comp-${workspaceId}`,
+          nameAr: companyNameAr,
+          nameEn: companyNameEn,
+          city: base.settings.city,
+          vatNumber: "",
+          crNumber: "",
+          address: base.settings.address || "",
+          phone: base.settings.phone || "",
+          email: base.settings.email || "",
+          bankName: base.settings.bankAccounts?.[0]?.bankName || "",
+          iban: base.settings.bankAccounts?.[0]?.iban || "",
+          receiptFooterAr: "",
+          isDefault: true
+        }
+      ],
+      users: [],
+      customRoles: [],
+      employeeInvitations: [],
+      properties: [],
+      units: [],
+      meterReadings: [],
+      owners: [],
+      ownerShares: [],
+      ownerTransfers: [],
+      vendors: [],
+      tenants: [],
+      leads: [],
+      leadEscalations: [],
+      contracts: [],
+      handovers: [],
+      installments: [],
+      payments: [],
+      journals: [],
+      expenses: [],
+      supplierInvoices: [],
+      recurringExpenses: [],
+      propertyBudgets: [],
+      assets: [],
+      tickets: [],
+      tasks: [],
+      communications: [],
+      documents: [],
+      purchaseOrders: [],
+      decisions: [],
+      notifications: [],
+      reminderLogs: [],
+      auditLogs: [],
+      backups: [],
+      loginHistory: [],
+      syncConflicts: [],
+      zatcaInvoices: [],
+      rolePermissions: JSON.parse(JSON.stringify(DEFAULT_ROLE_PERMISSIONS)),
+      roleModulePermissions: buildAllDefaultRoleModulePermissions(),
+      counters: {
+        receipt: 0,
+        expense: 0,
+        ticket: 0,
+        journal: 0,
+        contract: 0
+      },
+      processedIdempotencyKeys: [],
+      entityRevisions: {},
+      syncRevision: 1,
+      lastUpdatedAt: now
+    };
+  }
+  persistState(state, workspaceId) {
     state.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
     state.syncRevision = (state.syncRevision || 1) + 1;
     this.stateCache = state;
-    this.ctx.storage.sql.exec(
-      "INSERT OR REPLACE INTO state_snapshots (id, sync_revision, updated_at, state_json) VALUES (1, ?, ?, ?)",
-      state.syncRevision,
-      state.lastUpdatedAt,
-      JSON.stringify(state)
-    );
+    this.saveNormalizedState(state, workspaceId);
+  }
+  persistSecurityAuditImmediate(state, entry, workspaceId) {
+    if (!state.auditLogs) state.auditLogs = [];
+    state.auditLogs.unshift(entry);
+    if (state.auditLogs.length > 500) {
+      state.auditLogs = state.auditLogs.slice(0, 500);
+    }
+    const sql = this.ctx.storage.sql;
+    this.ctx.storage.transactionSync(() => {
+      sql.exec("DELETE FROM entities WHERE collection = 'auditLogs'");
+      for (let idx = 0; idx < state.auditLogs.length; idx++) {
+        const item = state.auditLogs[idx];
+        sql.exec(
+          "INSERT INTO entities (collection, id, company_id, sort_order, revision, updated_at, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "auditLogs",
+          item.id,
+          workspaceId || "default",
+          idx,
+          1,
+          item.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+          JSON.stringify(item)
+        );
+      }
+    });
+  }
+  recordDeniedAccess(state, workspaceId, actor, action, entityType, entityId, reason, opts) {
+    const entry = {
+      id: uid("aud"),
+      userId: actor?.id || "anonymous",
+      userName: actor?.nameAr || "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641",
+      userRole: actor?.roleLabelAr || "\u0645\u0633\u062A\u062E\u062F\u0645",
+      deviceName: opts?.deviceName || actor?.deviceName || "Cloudflare Edge",
+      action,
+      entityType,
+      entityId,
+      propertyId: opts?.propertyId,
+      summary: reason,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.persistSecurityAuditImmediate(state, entry, workspaceId);
+  }
+  getActingUser(state, userId) {
+    const user = state.users.find((u) => u.id === userId && isUserAccountActive(u));
+    if (!user) {
+      throw new WorkerPermissionDeniedError("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0623\u0648 \u062A\u0645 \u062A\u0639\u0637\u064A\u0644 \u062D\u0633\u0627\u0628\u0647");
+    }
+    return user;
   }
   hasPermission(state, userId, perm) {
-    const user = state.users.find((u) => u.id === userId && u.active);
+    const user = state.users.find((u) => u.id === userId && isUserAccountActive(u));
     if (!user) return false;
-    if (user.role === "sys_owner") return true;
-    return (state.rolePermissions[user.role] || []).includes(perm);
+    return userHasLegacyPermission(state, user, perm);
   }
-  assertPermission(state, userId, perm) {
-    if (!this.hasPermission(state, userId, perm)) {
-      throw new Error("\u0644\u064A\u0633\u062A \u0644\u062F\u064A\u0643 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0644\u0627\u0632\u0645\u0629 \u0644\u062A\u0646\u0641\u064A\u0630 \u0647\u0630\u0627 \u0627\u0644\u0625\u062C\u0631\u0627\u0621");
+  assertPermission(state, workspaceId, userId, perm, ctx) {
+    const user = this.getActingUser(state, userId);
+    if (!userHasLegacyPermission(state, user, perm)) {
+      const msg = "\u0644\u064A\u0633\u062A \u0644\u062F\u064A\u0643 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0644\u0627\u0632\u0645\u0629 \u0644\u062A\u0646\u0641\u064A\u0630 \u0647\u0630\u0627 \u0627\u0644\u0625\u062C\u0631\u0627\u0621";
+      this.recordDeniedAccess(
+        state,
+        workspaceId,
+        user,
+        "\u0631\u0641\u0636 \u0645\u062D\u0627\u0648\u0644\u0629 \u0625\u062C\u0631\u0627\u0621 \u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0628\u0647",
+        ctx?.entityType || "RBAC",
+        ctx?.entityId || perm,
+        `${msg} (${perm})`,
+        { propertyId: ctx?.propertyId, deviceName: ctx?.deviceName }
+      );
+      throw new WorkerPermissionDeniedError(msg);
     }
+    return user;
+  }
+  assertModuleAction(state, workspaceId, userId, module, action, ctx) {
+    const user = this.getActingUser(state, userId);
+    if (!userHasModuleAction(state, user, module, action)) {
+      const msg = `\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 (${action}) \u0639\u0644\u0649 \u0642\u0633\u0645 (${module})`;
+      this.recordDeniedAccess(
+        state,
+        workspaceId,
+        user,
+        "\u0631\u0641\u0636 \u0645\u062D\u0627\u0648\u0644\u0629 \u0648\u0635\u0648\u0644 \u0623\u0648 \u0625\u062C\u0631\u0627\u0621 \u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0628\u0647",
+        ctx?.entityType || "RBAC",
+        ctx?.entityId || `${module}:${action}`,
+        msg,
+        { propertyId: ctx?.propertyId, deviceName: ctx?.deviceName }
+      );
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    return user;
+  }
+  assertPropertyAccess(state, workspaceId, user, propertyId, actionLabel, entityType = "Property", entityId = propertyId || "unscoped", deviceName) {
+    if (!propertyId) {
+      if (userHasAllPropertiesAccess(state, user)) return;
+      const msg = `\u0631\u0641\u0636 ${actionLabel}: \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0642\u064A\u062F \u0628\u0646\u0637\u0627\u0642 \u0639\u0642\u0627\u0631\u0627\u062A \u0648\u0644\u0627 \u064A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0627\u0644\u0634\u0627\u0645\u0644`;
+      this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0648\u0635\u0648\u0644 \u0628\u062F\u0648\u0646 \u0646\u0637\u0627\u0642 \u0639\u0642\u0627\u0631", entityType, entityId, msg, { deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    const prop = state.properties.find((p) => p.id === propertyId);
+    if (prop && !canUserAccessCompany(state, user, prop.companyId)) {
+      const msg = `\u0631\u0641\u0636 ${actionLabel}: \u0627\u0644\u0639\u0642\u0627\u0631 \u064A\u062A\u0628\u0639 \u0634\u0631\u0643\u0629 \u0623\u062E\u0631\u0649 \u062E\u0627\u0631\u062C \u0646\u0637\u0627\u0642 \u062D\u0633\u0627\u0628\u0643`;
+      this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0648\u0635\u0648\u0644 \u0639\u0628\u0631 \u0627\u0644\u0634\u0631\u0643\u0627\u062A", entityType, entityId, msg, { propertyId, deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    if (!canUserAccessProperty(state, user, propertyId)) {
+      const msg = `\u0631\u0641\u0636 ${actionLabel}: \u0627\u0644\u0639\u0642\u0627\u0631 (${propertyId}) \u062E\u0627\u0631\u062C \u0646\u0637\u0627\u0642 \u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A \u0627\u0644\u0645\u0635\u0631\u062D \u0644\u0643 \u0628\u0647\u0627`;
+      this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0648\u0635\u0648\u0644 \u062E\u0627\u0631\u062C \u0646\u0637\u0627\u0642 \u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A", entityType, entityId, msg, { propertyId, deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+  }
+  getTenantLinkedPropertyIds(state, tenantId) {
+    const set = /* @__PURE__ */ new Set();
+    for (const c of state.contracts) {
+      if (c.tenantId === tenantId && c.propertyId) set.add(c.propertyId);
+    }
+    for (const u of state.units) {
+      if ((u.currentTenantId === tenantId || u.linkedTenantId === tenantId) && u.propertyId) set.add(u.propertyId);
+    }
+    for (const l of state.leads) {
+      const tid = l.convertedToTenantId || l.convertedTenantId;
+      if (tid === tenantId && l.propertyId) set.add(l.propertyId);
+    }
+    return Array.from(set);
+  }
+  assertTenantAccess(state, workspaceId, user, tenantId, actionLabel, deviceName) {
+    const tenant = state.tenants.find((t) => t.id === tenantId);
+    if (!tenant) throw new Error("\u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    if (user.role === "owner") {
+      const msg = `\u0631\u0641\u0636 ${actionLabel}: \u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u0627\u0644\u0643 \u0644\u0644\u0642\u0631\u0627\u0621\u0629 \u0641\u0642\u0637`;
+      this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u062A\u0639\u062F\u064A\u0644 \u0644\u062D\u0633\u0627\u0628 \u0645\u0627\u0644\u0643", "Tenant", tenant.id, msg, { deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    if (userHasAllPropertiesAccess(state, user)) return tenant;
+    const accessible = getAccessiblePropertyIdsSet(state, user);
+    if (accessible.size === 0) {
+      const msg = `\u0631\u0641\u0636 ${actionLabel}: \u062D\u0633\u0627\u0628\u0643 \u0645\u0642\u064A\u062F \u0628\u0640 0 \u0639\u0642\u0627\u0631 \u0648\u0644\u0627 \u064A\u0633\u0645\u062D \u0628\u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0645\u0644\u0641\u0627\u062A \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631\u064A\u0646`;
+      this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0648\u0635\u0648\u0644 \u0628\u0645\u0635\u0641\u0648\u0641\u0629 \u0639\u0642\u0627\u0631\u0627\u062A \u0641\u0627\u0631\u063A\u0629", "Tenant", tenant.id, msg, { deviceName });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    const linkedProps = this.getTenantLinkedPropertyIds(state, tenant.id);
+    if (linkedProps.length > 0 && !linkedProps.some((pid) => accessible.has(pid))) {
+      const msg = `\u0631\u0641\u0636 ${actionLabel}: \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631 \u064A\u0631\u062A\u0628\u0637 \u0628\u0639\u0642\u0627\u0631\u0627\u062A \u062E\u0627\u0631\u062C \u0646\u0637\u0627\u0642 \u0635\u0644\u0627\u062D\u064A\u0627\u062A\u0643`;
+      this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0648\u0635\u0648\u0644 \u0644\u0645\u0644\u0641 \u0645\u0633\u062A\u0623\u062C\u0631 \u062E\u0627\u0631\u062C \u0627\u0644\u0646\u0637\u0627\u0642", "Tenant", tenant.id, msg, {
+        propertyId: linkedProps[0],
+        deviceName
+      });
+      throw new WorkerPermissionDeniedError(msg);
+    }
+    return tenant;
   }
   bumpRevision(state, entityType, entityId) {
     if (!state.entityRevisions) state.entityRevisions = {};
     const key = `${entityType}:${entityId}`;
     state.entityRevisions[key] = (state.entityRevisions[key] || 0) + 1;
   }
-  appendAudit(state, userId, action, entityType, entityId, summary, deviceName = "Cloudflare Edge") {
+  appendAudit(state, userId, action, entityType, entityId, summary, deviceName = "Cloudflare Edge", propertyId) {
     const actor = state.users.find((u) => u.id === userId);
     state.auditLogs.unshift({
       id: uid("aud"),
@@ -3307,6 +4603,7 @@ var AqarWorkspaceDO = class extends DurableObject {
       action,
       entityType,
       entityId,
+      propertyId,
       summary,
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     });
@@ -3314,60 +4611,51 @@ var AqarWorkspaceDO = class extends DurableObject {
       state.auditLogs.length = 500;
     }
   }
-  getStateForUser(state, userId) {
-    const user = state.users.find((u) => u.id === userId && u.active);
+  getStateForUser(state, userId, workspaceId = "default") {
+    const user = state.users.find((u) => u.id === userId && isUserAccountActive(u));
     if (!user) {
-      throw new Error("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0623\u0648 \u062A\u0645 \u062A\u0639\u0637\u064A\u0644 \u062D\u0633\u0627\u0628\u0647");
+      throw new WorkerPermissionDeniedError("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0623\u0648 \u062A\u0645 \u062A\u0639\u0637\u064A\u0644 \u062D\u0633\u0627\u0628\u0647");
     }
-    const clone = JSON.parse(JSON.stringify(state));
-    const perms = new Set(clone.rolePermissions[user.role] || []);
-    if (user.role !== "sys_owner" && !perms.has("view_audit")) {
-      clone.auditLogs = [];
-    }
-    if (user.role !== "sys_owner" && !perms.has("backup_restore")) {
-      clone.backups = [];
-    }
-    if (user.role !== "sys_owner" && !perms.has("manage_users")) {
-      clone.users = clone.users.map(
-        (u) => u.id === user.id ? u : {
-          ...u,
-          email: "",
-          phone: ""
-        }
+    return filterStateForUser(state, user, { workspaceId });
+  }
+  revokeUserSessions(userId, workspaceId, reason, keepSessionId) {
+    if (keepSessionId) {
+      this.ctx.storage.sql.exec(
+        "UPDATE sessions SET revoked = 1 WHERE user_id = ? AND token_id != ?",
+        userId,
+        keepSessionId
       );
+    } else {
+      this.ctx.storage.sql.exec("UPDATE sessions SET revoked = 1 WHERE user_id = ?", userId);
     }
-    if (user.role === "owner" && user.ownerId) {
-      const ownerId = user.ownerId;
-      clone.properties = clone.properties.filter((p) => p.ownerShares.some((s) => s.ownerId === ownerId));
-      const propIds = new Set(clone.properties.map((p) => p.id));
-      clone.units = clone.units.filter((u) => propIds.has(u.propertyId));
-      clone.contracts = clone.contracts.filter((c) => propIds.has(c.propertyId));
-      const contractIds = new Set(clone.contracts.map((c) => c.id));
-      const tenantIds = new Set(clone.contracts.map((c) => c.tenantId));
-      clone.tenants = clone.tenants.filter((t) => tenantIds.has(t.id));
-      clone.installments = clone.installments.filter((i) => contractIds.has(i.contractId));
-      clone.payments = clone.payments.filter((p) => propIds.has(p.propertyId));
-      clone.expenses = clone.expenses.filter((e) => propIds.has(e.propertyId));
-      clone.tickets = clone.tickets.filter((t) => propIds.has(t.propertyId));
-      clone.documents = clone.documents.filter(
-        (d) => d.relatedType === "\u0639\u0642\u0627\u0631" && propIds.has(d.relatedId) || d.relatedType === "\u0639\u0642\u062F" && contractIds.has(d.relatedId)
-      );
-      clone.leads = [];
-      clone.auditLogs = [];
-      clone.backups = [];
-    } else if (user.allowedPropertyIds && user.allowedPropertyIds.length > 0 && user.role !== "sys_owner" && user.role !== "gm") {
-      const allowed = new Set(user.allowedPropertyIds);
-      clone.properties = clone.properties.filter((p) => allowed.has(p.id));
-      clone.units = clone.units.filter((u) => allowed.has(u.propertyId));
-      clone.contracts = clone.contracts.filter((c) => allowed.has(c.propertyId));
-      const contractIds = new Set(clone.contracts.map((c) => c.id));
-      clone.installments = clone.installments.filter((i) => contractIds.has(i.contractId));
-      clone.payments = clone.payments.filter((p) => allowed.has(p.propertyId));
-      clone.expenses = clone.expenses.filter((e) => allowed.has(e.propertyId));
-      clone.tickets = clone.tickets.filter((t) => allowed.has(t.propertyId));
-      clone.leads = clone.leads.filter((l) => !l.propertyId || allowed.has(l.propertyId));
+    return this.disconnectUserWebSockets(userId, workspaceId, reason, void 0, keepSessionId);
+  }
+  disconnectUserWebSockets(userId, workspaceId, reason, targetSessionId, excludeSessionId) {
+    let closed = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      const meta = ws.deserializeAttachment();
+      if (!meta || !meta.authenticated) continue;
+      if (meta.workspaceId !== workspaceId || meta.userId !== userId) continue;
+      if (targetSessionId && meta.sessionId !== targetSessionId) continue;
+      if (excludeSessionId && meta.sessionId === excludeSessionId) continue;
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "session:terminated",
+            userId: meta.userId,
+            sessionId: meta.sessionId,
+            reason
+          })
+        );
+      } catch {
+      }
+      try {
+        ws.close(4001, "Session terminated");
+      } catch {
+      }
+      closed += 1;
     }
-    return clone;
+    return closed;
   }
   extractToken(req) {
     const authHeader = req.headers.get("authorization");
@@ -3377,22 +4665,25 @@ var AqarWorkspaceDO = class extends DurableObject {
     const cookies = parseCookies(req.headers.get("cookie"));
     return cookies[SESSION_COOKIE_NAME] || null;
   }
-  async resolveActor(req, state, overrideToken) {
+  async resolveActor(req, state, workspaceId, overrideToken) {
     const rawToken = overrideToken || this.extractToken(req);
     if (!rawToken || !this.sessionSecretCache) return null;
     const claims = await verifyTokenWeb(rawToken, this.sessionSecretCache);
     if (!claims) return null;
+    if (claims.wid && claims.wid !== workspaceId) {
+      return null;
+    }
     const sessionRow = this.ctx.storage.sql.exec(
-      "SELECT user_id, expires_at, revoked FROM sessions WHERE token_id = ?",
+      "SELECT user_id, workspace_id, expires_at, revoked FROM sessions WHERE token_id = ?",
       claims.sid
     ).toArray()[0];
-    if (!sessionRow || sessionRow.revoked !== 0 || sessionRow.user_id !== claims.uid) {
+    if (!sessionRow || sessionRow.revoked !== 0 || sessionRow.user_id !== claims.uid || sessionRow.workspace_id !== workspaceId) {
       return null;
     }
     if (new Date(sessionRow.expires_at).getTime() <= Date.now()) {
       return null;
     }
-    const user = state.users.find((u) => u.id === claims.uid && u.active);
+    const user = state.users.find((u) => u.id === claims.uid && isUserAccountActive(u));
     if (!user) return null;
     const rawDevice = req.headers.get("x-device-name");
     let deviceName = claims.deviceName || "Cloudflare Web";
@@ -3405,31 +4696,99 @@ var AqarWorkspaceDO = class extends DurableObject {
     }
     return {
       userId: user.id,
+      workspaceId,
       role: user.role,
       sessionId: claims.sid,
       rawToken,
       deviceName
     };
   }
-  async issueSession(user, deviceName) {
+  buildSessionHeaders(accessToken, refreshToken, rememberMe, accessTtlMs, secure) {
+    const headers = new Headers();
+    const secAttr = secure ? "; Secure" : "";
+    const accessMaxAge = rememberMe ? `; Max-Age=${Math.floor(accessTtlMs / 1e3)}` : "";
+    headers.append(
+      "Set-Cookie",
+      `${SESSION_COOKIE_NAME}=${encodeURIComponent(accessToken)}; Path=/; HttpOnly; SameSite=Lax${secAttr}${accessMaxAge}`
+    );
+    if (rememberMe && refreshToken) {
+      headers.append(
+        "Set-Cookie",
+        `${REFRESH_COOKIE_NAME}=${encodeURIComponent(refreshToken)}; Path=/; HttpOnly; SameSite=Lax${secAttr}; Max-Age=${Math.floor(SESSION_TTL_MS / 1e3)}`
+      );
+    } else {
+      headers.append("Set-Cookie", `${REFRESH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${secAttr}; Max-Age=0`);
+    }
+    return headers;
+  }
+  async issueSession(user, workspaceId, deviceName, opts) {
+    const rememberMe = opts?.rememberMe !== false;
+    const isDesktop = opts?.appType === "desktop";
     const now = Date.now();
-    const exp = now + SESSION_TTL_MS;
+    const accessTtlMs = rememberMe ? ACCESS_TOKEN_TTL_MS : SESSION_SHORT_TTL_MS;
+    const exp = now + accessTtlMs;
     const expiresAt = new Date(exp).toISOString();
+    const refreshTtlMs = rememberMe ? SESSION_TTL_MS : SESSION_SHORT_TTL_MS;
+    const refreshExpiresAt = rememberMe ? new Date(now + refreshTtlMs).toISOString() : void 0;
+    const rawRefreshToken = rememberMe ? randomHexWeb(32) : void 0;
+    const refreshHash = rawRefreshToken ? await sha256HexWeb(rawRefreshToken) : null;
     const sid = `ses-${crypto.randomUUID().slice(0, 12)}`;
     const token = await signTokenWeb(
-      { sid, uid: user.id, role: user.role, deviceName, iat: now, exp },
+      { sid, uid: user.id, wid: workspaceId, role: user.role, deviceName, iat: now, exp },
       this.sessionSecretCache
     );
     this.ctx.storage.sql.exec(
-      "INSERT INTO sessions (token_id, user_id, device_name, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, ?, 0)",
+      "INSERT INTO sessions (token_id, user_id, workspace_id, device_name, app_type, remember_me, refresh_token_hash, refresh_expires_at, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
       sid,
       user.id,
+      workspaceId,
       deviceName,
+      isDesktop ? "desktop" : "web",
+      rememberMe ? 1 : 0,
+      refreshHash,
+      refreshExpiresAt || null,
       new Date(now).toISOString(),
       expiresAt
     );
-    const cookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1e3)}`;
-    return { token, cookieHeader };
+    const headers = this.buildSessionHeaders(token, rawRefreshToken, rememberMe, accessTtlMs, Boolean(opts?.secure));
+    return {
+      token,
+      refreshToken: isDesktop ? rawRefreshToken : void 0,
+      expiresAt,
+      refreshExpiresAt,
+      sessionId: sid,
+      rememberMe,
+      headers
+    };
+  }
+  checkAccountLock(userId) {
+    const row = this.ctx.storage.sql.exec(
+      "SELECT failed_attempts, locked_until FROM user_credentials WHERE user_id = ?",
+      userId
+    ).toArray()[0];
+    if (!row?.locked_until) return { locked: false };
+    const lockedUntilMs = new Date(row.locked_until).getTime();
+    if (lockedUntilMs > Date.now()) {
+      return { locked: true, retryAfterSec: Math.ceil((lockedUntilMs - Date.now()) / 1e3) };
+    }
+    return { locked: false };
+  }
+  recordFailedAttempt(userId) {
+    const row = this.ctx.storage.sql.exec("SELECT failed_attempts FROM user_credentials WHERE user_id = ?", userId).toArray()[0];
+    const next = (row?.failed_attempts || 0) + 1;
+    const lockedUntil = next >= MAX_FAILED_LOGIN_ATTEMPTS ? new Date(Date.now() + LOCKOUT_DURATION_MS).toISOString() : null;
+    this.ctx.storage.sql.exec(
+      "UPDATE user_credentials SET failed_attempts = ?, locked_until = ? WHERE user_id = ?",
+      next,
+      lockedUntil,
+      userId
+    );
+  }
+  clearFailedAttempts(userId) {
+    this.ctx.storage.sql.exec(
+      "UPDATE user_credentials SET failed_attempts = 0, locked_until = NULL WHERE user_id = ?",
+      userId
+    );
   }
   getPresenceList(state) {
     const out = [];
@@ -3450,11 +4809,11 @@ var AqarWorkspaceDO = class extends DurableObject {
     }
     return out;
   }
-  broadcastStateChange(state, actorUserId, summary) {
+  broadcastStateChange(state, actorUserId, summary, workspaceId) {
     const presence = this.getPresenceList(state);
     for (const ws of this.ctx.getWebSockets()) {
       const meta = ws.deserializeAttachment();
-      if (!meta || !meta.authenticated) continue;
+      if (!meta || !meta.authenticated || meta.workspaceId !== workspaceId) continue;
       try {
         ws.send(
           JSON.stringify({
@@ -3462,27 +4821,86 @@ var AqarWorkspaceDO = class extends DurableObject {
             actorUserId,
             summary,
             presence,
-            state: this.getStateForUser(state, meta.userId)
+            state: this.getStateForUser(state, meta.userId, workspaceId)
           })
         );
       } catch {
       }
     }
   }
+  normalizeAllowedPropertiesInput(input) {
+    if (!Array.isArray(input)) return void 0;
+    const cleaned = input.map((id) => String(id).trim()).filter(Boolean);
+    if (cleaned.includes(ALL_PROPERTIES_SCOPE)) return [ALL_PROPERTIES_SCOPE];
+    return Array.from(new Set(cleaned));
+  }
   async handleMutation(state, actor, method, pathname, body) {
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    const { userId, deviceName } = actor;
+    const { userId, workspaceId, deviceName } = actor;
     if (method === "PATCH" && pathname === "/api/settings") {
+      const user = this.assertModuleAction(state, workspaceId, userId, "settings", "edit", {
+        entityType: "CompanySettings",
+        entityId: "settings",
+        deviceName
+      });
+      if (user.role !== "sys_owner" && user.role !== "gm") {
+        const msg = "\u062A\u0639\u062F\u064A\u0644 \u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0645\u0646\u0634\u0623\u0629 \u0645\u062A\u0627\u062D \u0641\u0642\u0637 \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0627\u0644\u0645\u062F\u064A\u0631 \u0627\u0644\u0639\u0627\u0645";
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A", "CompanySettings", "settings", msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       state.settings = { ...state.settings, ...body };
       this.bumpRevision(state, "settings", "company");
       this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A", "\u0625\u0639\u062F\u0627\u062F\u0627\u062A", "company", "\u062A\u062D\u062F\u064A\u062B \u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0645\u0646\u0634\u0623\u0629", deviceName);
-      this.persistState(state);
-      return { settings: state.settings, state: this.getStateForUser(state, userId) };
+      this.persistState(state, workspaceId);
+      return { settings: state.settings, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "POST" && pathname === "/api/companies") {
+      const user = this.assertPermission(state, workspaceId, userId, "manage_users", {
+        entityType: "CompanyProfile",
+        deviceName
+      });
+      if (user.role !== "sys_owner") {
+        const msg = "\u0625\u0646\u0634\u0627\u0621 \u0634\u0631\u0643\u0629 \u0639\u0642\u0627\u0631\u064A\u0629 \u0623\u0648 \u0641\u0631\u0639 \u062C\u062F\u064A\u062F \u0645\u062D\u0635\u0648\u0631 \u0628\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0641\u0642\u0637";
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0625\u0646\u0634\u0627\u0621 \u0634\u0631\u0643\u0629 \u062C\u062F\u064A\u062F\u0629", "CompanyProfile", "create", msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
+      if (!state.companies) state.companies = [];
+      const company = {
+        id: uid("comp"),
+        nameAr: String(body.nameAr || "\u0641\u0631\u0639 \u062C\u062F\u064A\u062F"),
+        nameEn: String(body.nameEn || body.nameAr || "New Company"),
+        logoText: String(body.logoText || ""),
+        crNumber: String(body.crNumber || ""),
+        vatNumber: String(body.vatNumber || ""),
+        address: String(body.address || ""),
+        city: String(body.city || state.settings.city || "\u0627\u0644\u0631\u064A\u0627\u0636"),
+        phone: String(body.phone || ""),
+        email: String(body.email || ""),
+        bankName: String(body.bankName || ""),
+        iban: String(body.iban || ""),
+        receiptFooterAr: String(body.receiptFooterAr || ""),
+        isDefault: false
+      };
+      state.companies.push(company);
+      this.bumpRevision(state, "companies", company.id);
+      this.appendAudit(state, userId, "\u0625\u0636\u0627\u0641\u0629 \u0634\u0631\u0643\u0629 \u0639\u0642\u0627\u0631\u064A\u0629", "CompanyProfile", company.id, `\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0634\u0631\u0643\u0629 ${company.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { company, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/properties") {
-      this.assertPermission(state, userId, "manage_properties");
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "properties", "create", {
+        entityType: "Property",
+        deviceName
+      });
+      const targetCompanyId = String(body.companyId || actorUser.companyId || state.companies?.[0]?.id || `comp-${workspaceId}`);
+      if (!canUserAccessCompany(state, actorUser, targetCompanyId)) {
+        const msg = "\u0631\u0641\u0636 \u0625\u0636\u0627\u0641\u0629 \u0639\u0642\u0627\u0631: \u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u0627\u0644\u0625\u0636\u0627\u0641\u0629 \u0644\u0634\u0631\u0643\u0629 \u062E\u0627\u0631\u062C \u0646\u0637\u0627\u0642 \u062D\u0633\u0627\u0628\u0643";
+        this.recordDeniedAccess(state, workspaceId, actorUser, "\u0631\u0641\u0636 \u0625\u0636\u0627\u0641\u0629 \u0639\u0642\u0627\u0631 \u0639\u0628\u0631 \u0627\u0644\u0634\u0631\u0643\u0627\u062A", "Property", "create", msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       const prop = {
         id: uid("prop"),
+        companyId: targetCompanyId,
         code: String(body.code || `PR-${state.properties.length + 101}`),
         nameAr: String(body.nameAr || "\u0639\u0642\u0627\u0631 \u062C\u062F\u064A\u062F"),
         nameEn: String(body.nameEn || body.nameAr || "New Property"),
@@ -3505,17 +4923,27 @@ var AqarWorkspaceDO = class extends DurableObject {
         createdAt: now
       };
       state.properties.unshift(prop);
+      if (!userHasAllPropertiesAccess(state, actorUser)) {
+        actorUser.allowedPropertyIds = Array.from(/* @__PURE__ */ new Set([...actorUser.allowedPropertyIds || [], prop.id]));
+      }
       this.bumpRevision(state, "properties", prop.id);
-      this.appendAudit(state, userId, "\u0625\u0636\u0627\u0641\u0629 \u0639\u0642\u0627\u0631", "\u0639\u0642\u0627\u0631", prop.id, `\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0639\u0642\u0627\u0631 ${prop.nameAr}`, deviceName);
-      this.persistState(state);
-      return { property: prop, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u0625\u0636\u0627\u0641\u0629 \u0639\u0642\u0627\u0631", "\u0639\u0642\u0627\u0631", prop.id, `\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0639\u0642\u0627\u0631 ${prop.nameAr}`, deviceName, prop.id);
+      this.persistState(state, workspaceId);
+      return { property: prop, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/units") {
-      this.assertPermission(state, userId, "manage_properties");
+      const user = this.assertModuleAction(state, workspaceId, userId, "units", "create", {
+        entityType: "Unit",
+        propertyId: body.propertyId ? String(body.propertyId) : void 0,
+        deviceName
+      });
+      const propertyId = String(body.propertyId || "");
+      if (!propertyId) throw new Error("\u064A\u062C\u0628 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0639\u0642\u0627\u0631 \u0644\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0648\u062D\u062F\u0629");
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, "\u0625\u0636\u0627\u0641\u0629 \u0648\u062D\u062F\u0629", "Unit", propertyId, deviceName);
       const monthly = Number(body.suggestedMonthlyRent || Math.round(Number(body.suggestedAnnualRent || 3e4) / 12));
       const unit = {
         id: uid("unit"),
-        propertyId: String(body.propertyId || state.properties[0]?.id || ""),
+        propertyId,
         buildingName: String(body.buildingName || "\u0627\u0644\u0645\u0628\u0646\u0649 \u0627\u0644\u0631\u0626\u064A\u0633\u064A"),
         floor: Number(body.floor || 1),
         unitNumber: String(body.unitNumber || `${state.units.length + 101}`),
@@ -3536,21 +4964,36 @@ var AqarWorkspaceDO = class extends DurableObject {
       };
       state.units.push(unit);
       this.bumpRevision(state, "units", unit.id);
-      this.persistState(state);
-      return { unit, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u0625\u0636\u0627\u0641\u0629 \u0648\u062D\u062F\u0629", "\u0648\u062D\u062F\u0629", unit.id, `\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0648\u062D\u062F\u0629 ${unit.unitNumber}`, deviceName, unit.propertyId);
+      this.persistState(state, workspaceId);
+      return { unit, state: this.getStateForUser(state, userId, workspaceId) };
     }
     const unitStatusMatch = /^\/api\/units\/([^/]+)\/status$/.exec(pathname);
     if (method === "PATCH" && unitStatusMatch) {
-      this.assertPermission(state, userId, "manage_properties");
+      const user = this.assertModuleAction(state, workspaceId, userId, "units", "edit", {
+        entityType: "Unit",
+        entityId: unitStatusMatch[1],
+        deviceName
+      });
       const unit = state.units.find((u) => u.id === unitStatusMatch[1]);
       if (!unit) throw new Error("\u0627\u0644\u0648\u062D\u062F\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
+      this.assertPropertyAccess(state, workspaceId, user, unit.propertyId, "\u062A\u062D\u062F\u064A\u062B \u062D\u0627\u0644\u0629 \u0648\u062D\u062F\u0629", "Unit", unit.id, deviceName);
       unit.status = body.status;
       this.bumpRevision(state, "units", unit.id);
-      this.persistState(state);
-      return { unit, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u062D\u0627\u0644\u0629 \u0648\u062D\u062F\u0629", "\u0648\u062D\u062F\u0629", unit.id, `\u062A\u063A\u064A\u064A\u0631 \u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u062D\u062F\u0629 ${unit.unitNumber}`, deviceName, unit.propertyId);
+      this.persistState(state, workspaceId);
+      return { unit, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/tenants") {
-      this.assertPermission(state, userId, "manage_tenants");
+      const user = this.assertModuleAction(state, workspaceId, userId, "tenants", "create", {
+        entityType: "Tenant",
+        deviceName
+      });
+      if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        const msg = "\u0631\u0641\u0636 \u062A\u0633\u062C\u064A\u0644 \u0645\u0633\u062A\u0623\u062C\u0631: \u062D\u0633\u0627\u0628\u0643 \u0645\u0642\u064A\u062F \u0628\u0640 0 \u0639\u0642\u0627\u0631 \u0645\u0635\u0631\u062D \u0628\u0647";
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0625\u0636\u0627\u0641\u0629 \u0645\u0633\u062A\u0623\u062C\u0631 \u0628\u062F\u0648\u0646 \u0639\u0642\u0627\u0631\u0627\u062A", "Tenant", "create", msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       const tenant = {
         id: uid("ten"),
         nameAr: String(body.nameAr || "\u0645\u0633\u062A\u0623\u062C\u0631 \u062C\u062F\u064A\u062F"),
@@ -3567,38 +5010,64 @@ var AqarWorkspaceDO = class extends DurableObject {
       };
       state.tenants.unshift(tenant);
       this.bumpRevision(state, "tenants", tenant.id);
-      this.persistState(state);
-      return { tenant, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u0633\u062C\u064A\u0644 \u0645\u0633\u062A\u0623\u062C\u0631", "\u0645\u0633\u062A\u0623\u062C\u0631", tenant.id, `\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631 ${tenant.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { tenant, state: this.getStateForUser(state, userId, workspaceId) };
     }
     const tenantMatch = /^\/api\/tenants\/([^/]+)$/.exec(pathname);
     if (method === "PATCH" && tenantMatch) {
-      this.assertPermission(state, userId, "manage_tenants");
-      const tenant = state.tenants.find((t) => t.id === tenantMatch[1]);
-      if (!tenant) throw new Error("\u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      const user = this.assertModuleAction(state, workspaceId, userId, "tenants", "edit", {
+        entityType: "Tenant",
+        entityId: tenantMatch[1],
+        deviceName
+      });
+      const tenant = this.assertTenantAccess(state, workspaceId, user, tenantMatch[1], "\u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631", deviceName);
       Object.assign(tenant, body);
       this.bumpRevision(state, "tenants", tenant.id);
-      this.persistState(state);
-      return { tenant, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u0645\u0633\u062A\u0623\u062C\u0631", "\u0645\u0633\u062A\u0623\u062C\u0631", tenant.id, `\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u0641 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631 ${tenant.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { tenant, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "DELETE" && tenantMatch) {
-      this.assertPermission(state, userId, "manage_tenants");
-      state.tenants = state.tenants.filter((t) => t.id !== tenantMatch[1]);
-      this.bumpRevision(state, "tenants", tenantMatch[1]);
-      this.persistState(state);
-      return { ok: true, state: this.getStateForUser(state, userId) };
+      const user = this.assertModuleAction(state, workspaceId, userId, "tenants", "delete_void", {
+        entityType: "Tenant",
+        entityId: tenantMatch[1],
+        deviceName
+      });
+      const tenant = this.assertTenantAccess(state, workspaceId, user, tenantMatch[1], "\u062D\u0630\u0641 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631", deviceName);
+      state.tenants = state.tenants.filter((t) => t.id !== tenant.id);
+      this.bumpRevision(state, "tenants", tenant.id);
+      this.appendAudit(state, userId, "\u062D\u0630\u0641 \u0645\u0633\u062A\u0623\u062C\u0631", "\u0645\u0633\u062A\u0623\u062C\u0631", tenant.id, `\u062D\u0630\u0641 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631 ${tenant.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/contracts") {
-      this.assertPermission(state, userId, "manage_contracts");
+      const user = this.assertModuleAction(state, workspaceId, userId, "contracts", "create", {
+        entityType: "LeaseContract",
+        propertyId: body.propertyId ? String(body.propertyId) : void 0,
+        deviceName
+      });
       const unitId = String(body.unitId || "");
+      const unit = state.units.find((u) => u.id === unitId);
+      const propertyId = String(body.propertyId || unit?.propertyId || "");
+      if (!propertyId) throw new Error("\u064A\u062C\u0628 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0639\u0642\u0627\u0631 \u0627\u0644\u0645\u0631\u062A\u0628\u0637 \u0628\u0627\u0644\u0639\u0642\u062F");
+      if (unit && unit.propertyId !== propertyId) {
+        throw new Error("\u0627\u0644\u0648\u062D\u062F\u0629 \u0627\u0644\u0645\u062D\u062F\u062F\u0629 \u0644\u0627 \u062A\u062A\u0628\u0639 \u0644\u0644\u0639\u0642\u0627\u0631 \u0627\u0644\u0645\u062E\u062A\u0627\u0631");
+      }
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, "\u0625\u0646\u0634\u0627\u0621 \u0639\u0642\u062F", "LeaseContract", propertyId, deviceName);
+      const tenantId = String(body.tenantId || "");
+      if (tenantId) {
+        this.assertTenantAccess(state, workspaceId, user, tenantId, "\u0631\u0628\u0637 \u0645\u0633\u062A\u0623\u062C\u0631 \u0628\u0639\u0642\u062F", deviceName);
+      }
       const contract = {
         id: uid("con"),
         internalNumber: String(body.internalNumber || `CNT-${state.contracts.length + 1001}`),
         ejarNumber: String(body.ejarNumber || ""),
         ejarStatus: body.ejarStatus || "\u063A\u064A\u0631 \u0645\u0648\u062B\u0642",
         lifecycleStatus: "\u0646\u0634\u0637",
-        propertyId: String(body.propertyId || state.properties[0]?.id || ""),
+        propertyId,
         unitId,
-        tenantId: String(body.tenantId || state.tenants[0]?.id || ""),
+        tenantId,
         startDate: String(body.startDate || now.slice(0, 10)),
         endDate: String(body.endDate || now.slice(0, 10)),
         annualRent: Number(body.annualRent || 3e4),
@@ -3613,26 +5082,40 @@ var AqarWorkspaceDO = class extends DurableObject {
         createdAt: now
       };
       state.contracts.unshift(contract);
-      const unit = state.units.find((u) => u.id === unitId);
       if (unit) {
         unit.status = "\u0645\u0624\u062C\u0631\u0629";
         this.bumpRevision(state, "units", unit.id);
       }
       this.bumpRevision(state, "contracts", contract.id);
-      this.persistState(state);
-      return { contract, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u0625\u0646\u0634\u0627\u0621 \u0639\u0642\u062F", "\u0639\u0642\u062F", contract.id, `\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0642\u062F ${contract.internalNumber}`, deviceName, contract.propertyId);
+      this.persistState(state, workspaceId);
+      return { contract, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/payments") {
-      this.assertPermission(state, userId, "collect_payments");
+      const user = this.assertPermission(state, workspaceId, userId, "collect_payments", {
+        entityType: "Payment",
+        entityId: String(body.contractId || "payment"),
+        deviceName
+      });
+      const contract = state.contracts.find((c) => c.id === body.contractId);
+      if (!contract) throw new Error("\u0627\u0644\u0639\u0642\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      this.assertPropertyAccess(state, workspaceId, user, contract.propertyId, "\u062A\u062D\u0635\u064A\u0644 \u062F\u0641\u0639\u0629", "Payment", contract.id, deviceName);
       const amount = Number(body.amount || 0);
       if (amount <= 0) throw new Error("\u0645\u0628\u0644\u063A \u0627\u0644\u062A\u062D\u0635\u064A\u0644 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 \u0623\u0643\u0628\u0631 \u0645\u0646 \u0635\u0641\u0631");
       const idempotencyKey = String(body.idempotencyKey || uid("idem"));
       const existing = state.payments.find((p) => p.idempotencyKey === idempotencyKey);
       if (existing) {
-        return { payment: existing, duplicate: true, state: this.getStateForUser(state, userId) };
+        return { payment: existing, duplicate: true, state: this.getStateForUser(state, userId, workspaceId) };
       }
-      const contract = state.contracts.find((c) => c.id === body.contractId);
-      if (!contract) throw new Error("\u0627\u0644\u0639\u0642\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      const refNo = body.referenceNumber ? String(body.referenceNumber).trim() : "";
+      if (refNo) {
+        const dupRef = state.payments.find(
+          (p) => p.contractId === body.contractId && p.referenceNumber === refNo && p.amount === amount && p.status === "\u0645\u0639\u062A\u0645\u062F"
+        );
+        if (dupRef) {
+          return { payment: dupRef, duplicate: true, state: this.getStateForUser(state, userId, workspaceId) };
+        }
+      }
       state.counters.receipt += 1;
       const allocations = [];
       if ((body.paymentType || "\u0625\u064A\u062C\u0627\u0631") === "\u0625\u064A\u062C\u0627\u0631") {
@@ -3662,7 +5145,7 @@ var AqarWorkspaceDO = class extends DurableObject {
         currency: body.currency || "SAR",
         paymentMethod: body.paymentMethod || "\u062A\u062D\u0648\u064A\u0644 \u0628\u0646\u0643\u064A",
         paymentType: body.paymentType || "\u0625\u064A\u062C\u0627\u0631",
-        referenceNumber: body.referenceNumber,
+        referenceNumber: refNo || void 0,
         receivedBy: userId,
         deviceName,
         status: "\u0645\u0639\u062A\u0645\u062F",
@@ -3670,20 +5153,64 @@ var AqarWorkspaceDO = class extends DurableObject {
         createdAt: now
       };
       state.payments.unshift(payment);
+      if (!state.processedIdempotencyKeys.includes(idempotencyKey)) {
+        state.processedIdempotencyKeys.push(idempotencyKey);
+      }
       this.bumpRevision(state, "payments", payment.id);
-      this.appendAudit(state, userId, "\u062A\u062D\u0635\u064A\u0644 \u062F\u0641\u0639\u0629", "\u062F\u0641\u0639\u0629", payment.id, `\u0633\u0646\u062F ${payment.receiptNumber} \u0628\u0645\u0628\u0644\u063A ${amount}`, deviceName);
-      this.persistState(state);
-      return { payment, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u062D\u0635\u064A\u0644 \u062F\u0641\u0639\u0629", "\u062F\u0641\u0639\u0629", payment.id, `\u0633\u0646\u062F ${payment.receiptNumber} \u0628\u0645\u0628\u0644\u063A ${amount}`, deviceName, payment.propertyId);
+      this.persistState(state, workspaceId);
+      return { payment, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    const revPayMatch = /^\/api\/payments\/([^/]+)\/reverse$/.exec(pathname);
+    if (method === "POST" && revPayMatch) {
+      const user = this.assertPermission(state, workspaceId, userId, "reverse_receipts", {
+        entityType: "Payment",
+        entityId: revPayMatch[1],
+        deviceName
+      });
+      const orig = state.payments.find((p) => p.id === revPayMatch[1]);
+      if (!orig) throw new Error("\u0627\u0644\u0633\u0646\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      this.assertPropertyAccess(state, workspaceId, user, orig.propertyId, "\u0639\u0643\u0633 \u0633\u0646\u062F \u0642\u0628\u0636", "Payment", orig.id, deviceName);
+      if (orig.status === "\u0645\u0639\u0643\u0648\u0633") throw new Error("\u062A\u0645 \u0639\u0643\u0633 \u0647\u0630\u0627 \u0627\u0644\u0633\u0646\u062F \u0645\u0633\u0628\u0642\u0627\u064B");
+      const todayStr = now.slice(0, 10);
+      for (const alloc of orig.allocations || []) {
+        const inst = state.installments.find((i) => i.id === alloc.installmentId);
+        if (inst) {
+          inst.paidAmount = Math.max(0, Math.round((inst.paidAmount - alloc.amount) * 100) / 100);
+          inst.remainingAmount = Math.round((inst.amount - inst.paidAmount) * 100) / 100;
+          if (inst.paidAmount > 0) {
+            inst.status = "\u0645\u062F\u0641\u0648\u0639\u0629 \u062C\u0632\u0626\u064A\u0627\u064B";
+          } else {
+            inst.status = inst.dueDate < todayStr ? "\u0645\u062A\u0623\u062E\u0631\u0629" : inst.dueDate === todayStr ? "\u0645\u0633\u062A\u062D\u0642\u0629 \u0627\u0644\u064A\u0648\u0645" : "\u0644\u0645 \u062A\u0633\u062A\u062D\u0642";
+          }
+          this.bumpRevision(state, "installments", inst.id);
+        }
+      }
+      state.counters.receipt += 1;
+      orig.status = "\u0645\u0639\u0643\u0648\u0633";
+      orig.reversedByReceiptId = `REV-${(/* @__PURE__ */ new Date()).getFullYear()}-${String(state.counters.receipt).padStart(4, "0")}`;
+      orig.reversalReason = String(body.reason || "\u0625\u0644\u063A\u0627\u0621 \u0648\u062A\u0635\u062D\u064A\u062D \u0627\u0644\u0633\u0646\u062F");
+      this.bumpRevision(state, "payments", orig.id);
+      this.appendAudit(state, userId, "\u0639\u0643\u0633 \u0633\u0646\u062F", "\u062F\u0641\u0639\u0629", orig.id, `\u0639\u0643\u0633 \u0627\u0644\u0633\u0646\u062F ${orig.receiptNumber}`, deviceName, orig.propertyId);
+      this.persistState(state, workspaceId);
+      return { payment: orig, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/expenses") {
-      this.assertPermission(state, userId, "create_expense");
+      const user = this.assertPermission(state, workspaceId, userId, "create_expense", {
+        entityType: "Expense",
+        propertyId: body.propertyId ? String(body.propertyId) : void 0,
+        deviceName
+      });
+      const propertyId = String(body.propertyId || "");
+      if (!propertyId) throw new Error("\u064A\u062C\u0628 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0639\u0642\u0627\u0631 \u0644\u0644\u0645\u0635\u0631\u0648\u0641");
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, "\u062A\u0633\u062C\u064A\u0644 \u0645\u0635\u0631\u0648\u0641", "Expense", propertyId, deviceName);
       state.counters.expense += 1;
       const expense = {
         id: uid("exp"),
         expenseNumber: `EXP-${String(state.counters.expense).padStart(4, "0")}`,
         date: String(body.date || now.slice(0, 10)),
         category: body.category || "\u0635\u064A\u0627\u0646\u0629",
-        propertyId: String(body.propertyId || state.properties[0]?.id || ""),
+        propertyId,
         unitId: body.unitId ? String(body.unitId) : void 0,
         vendorId: body.vendorId ? String(body.vendorId) : void 0,
         invoiceNumber: String(body.invoiceNumber || `INV-${Date.now().toString().slice(-5)}`),
@@ -3698,17 +5225,85 @@ var AqarWorkspaceDO = class extends DurableObject {
       };
       state.expenses.unshift(expense);
       this.bumpRevision(state, "expenses", expense.id);
-      this.persistState(state);
-      return { expense, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u0633\u062C\u064A\u0644 \u0645\u0635\u0631\u0648\u0641", "\u0645\u0635\u0631\u0648\u0641", expense.id, `\u062A\u0633\u062C\u064A\u0644 \u0645\u0635\u0631\u0648\u0641 ${expense.expenseNumber}`, deviceName, expense.propertyId);
+      this.persistState(state, workspaceId);
+      return { expense, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    const expPatchMatch = /^\/api\/expenses\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && expPatchMatch) {
+      const user = this.assertModuleAction(state, workspaceId, userId, "expenses", "edit", {
+        entityType: "Expense",
+        entityId: expPatchMatch[1],
+        deviceName
+      });
+      const expense = state.expenses.find((e) => e.id === expPatchMatch[1]);
+      if (!expense) throw new Error("\u0627\u0644\u0645\u0635\u0631\u0648\u0641 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      this.assertPropertyAccess(state, workspaceId, user, expense.propertyId, "\u062A\u0639\u062F\u064A\u0644 \u0645\u0635\u0631\u0648\u0641", "Expense", expense.id, deviceName);
+      Object.assign(expense, body);
+      this.bumpRevision(state, "expenses", expense.id);
+      this.appendAudit(state, userId, "\u062A\u0639\u062F\u064A\u0644 \u0645\u0635\u0631\u0648\u0641", "\u0645\u0635\u0631\u0648\u0641", expense.id, `\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0645\u0635\u0631\u0648\u0641 ${expense.expenseNumber}`, deviceName, expense.propertyId);
+      this.persistState(state, workspaceId);
+      return { expense, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    const expDecisionMatch = /^\/api\/expenses\/([^/]+)\/decision$/.exec(pathname);
+    if (method === "POST" && expDecisionMatch) {
+      const user = this.assertModuleAction(state, workspaceId, userId, "expenses", "approve", {
+        entityType: "Expense",
+        entityId: expDecisionMatch[1],
+        deviceName
+      });
+      const expense = state.expenses.find((e) => e.id === expDecisionMatch[1]);
+      if (!expense) throw new Error("\u0627\u0644\u0645\u0635\u0631\u0648\u0641 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      this.assertPropertyAccess(state, workspaceId, user, expense.propertyId, "\u0627\u0639\u062A\u0645\u0627\u062F \u0645\u0635\u0631\u0648\u0641", "Expense", expense.id, deviceName);
+      if (expense.createdBy === userId && user.role !== "sys_owner") {
+        const msg = "\u0641\u0635\u0644 \u0627\u0644\u0645\u0647\u0627\u0645 (SoD): \u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u0627\u0639\u062A\u0645\u0627\u062F \u0645\u0635\u0631\u0648\u0641 \u0642\u0645\u062A \u0628\u062A\u0633\u062C\u064A\u0644\u0647 \u0628\u0646\u0641\u0633\u0643";
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0627\u0639\u062A\u0645\u0627\u062F \u0630\u0627\u062A\u064A \u0644\u0644\u0645\u0635\u0631\u0648\u0641", "Expense", expense.id, msg, { propertyId: expense.propertyId, deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
+      const decision = body.decision === "reject" ? "reject" : "approve";
+      const oldStatus = expense.approvalStatus;
+      if (decision === "reject") {
+        expense.approvalStatus = "\u0645\u0631\u0641\u0648\u0636";
+        expense.rejectionReason = String(body.reason || "\u0631\u0641\u0636 \u0625\u062F\u0627\u0631\u064A");
+      } else if (expense.approvalStatus === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u0645\u0634\u0631\u0641") {
+        if (!this.hasPermission(state, userId, "approve_expense_supervisor") && !this.hasPermission(state, userId, "approve_expense_manager") && user.role !== "sys_owner") {
+          throw new WorkerPermissionDeniedError("\u062A\u062D\u062A\u0627\u062C \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u0645\u0634\u0631\u0641 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u062D\u0644\u0629");
+        }
+        expense.approvedBySupervisor = user.id;
+        expense.approvalStatus = expense.amount > 5e3 ? "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u0645\u062F\u064A\u0631" : "\u0645\u0639\u062A\u0645\u062F";
+      } else if (expense.approvalStatus === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u0645\u062F\u064A\u0631") {
+        if (!this.hasPermission(state, userId, "approve_expense_manager") && user.role !== "sys_owner") {
+          throw new WorkerPermissionDeniedError("\u062A\u062D\u062A\u0627\u062C \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u0645\u062F\u064A\u0631 \u0627\u0644\u0639\u0627\u0645 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u062D\u0644\u0629");
+        }
+        expense.approvedByManager = user.id;
+        expense.approvalStatus = expense.amount > 2e4 ? "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u0645\u0627\u0644\u0643" : "\u0645\u0639\u062A\u0645\u062F";
+      } else if (expense.approvalStatus === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u0645\u0627\u0644\u0643") {
+        if (user.role !== "owner" && user.role !== "sys_owner" && user.role !== "gm") {
+          throw new WorkerPermissionDeniedError("\u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0627\u0644\u0646\u0647\u0627\u0626\u064A\u0629 \u0644\u0644\u0645\u0635\u0631\u0648\u0641\u0627\u062A \u0627\u0644\u0643\u0628\u0631\u0649 \u0645\u062E\u0635\u0635\u0629 \u0644\u0644\u0645\u0627\u0644\u0643 \u0623\u0648 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+        }
+        expense.approvedByOwner = user.id;
+        expense.approvalStatus = "\u0645\u0639\u062A\u0645\u062F";
+      }
+      this.bumpRevision(state, "expenses", expense.id);
+      this.appendAudit(state, userId, "\u0642\u0631\u0627\u0631 \u0627\u0639\u062A\u0645\u0627\u062F \u0645\u0635\u0631\u0648\u0641", "\u0645\u0635\u0631\u0648\u0641", expense.id, `\u062A\u062D\u062F\u064A\u062B ${expense.expenseNumber} \u0645\u0646 ${oldStatus} \u0625\u0644\u0649 ${expense.approvalStatus}`, deviceName, expense.propertyId);
+      this.persistState(state, workspaceId);
+      return { expense, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/tickets") {
-      this.assertPermission(state, userId, "manage_maintenance");
+      const user = this.assertModuleAction(state, workspaceId, userId, "maintenance", "create", {
+        entityType: "MaintenanceTicket",
+        propertyId: body.propertyId ? String(body.propertyId) : void 0,
+        deviceName
+      });
+      const propertyId = String(body.propertyId || "");
+      if (!propertyId) throw new Error("\u064A\u062C\u0628 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0639\u0642\u0627\u0631 \u0644\u0628\u0644\u0627\u063A \u0627\u0644\u0635\u064A\u0627\u0646\u0629");
+      this.assertPropertyAccess(state, workspaceId, user, propertyId, "\u0641\u062A\u062D \u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629", "MaintenanceTicket", propertyId, deviceName);
       state.counters.ticket += 1;
       const ticket = {
         id: uid("tkt"),
         ticketNumber: `MNT-${String(state.counters.ticket).padStart(4, "0")}`,
-        propertyId: String(body.propertyId || state.properties[0]?.id || ""),
-        unitId: String(body.unitId || state.units[0]?.id || ""),
+        propertyId,
+        unitId: String(body.unitId || ""),
         source: body.source || "\u0627\u0644\u0645\u0634\u0631\u0641",
         category: String(body.category || "\u0623\u062E\u0631\u0649"),
         priority: body.priority || "\u0645\u062A\u0648\u0633\u0637",
@@ -3723,24 +5318,47 @@ var AqarWorkspaceDO = class extends DurableObject {
       };
       state.tickets.unshift(ticket);
       this.bumpRevision(state, "tickets", ticket.id);
-      this.persistState(state);
-      return { ticket, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u0641\u062A\u062D \u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629", "\u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629", ticket.id, `\u0641\u062A\u062D \u0627\u0644\u0628\u0644\u0627\u063A ${ticket.ticketNumber}`, deviceName, ticket.propertyId);
+      this.persistState(state, workspaceId);
+      return { ticket, state: this.getStateForUser(state, userId, workspaceId) };
     }
     const tktMatch = /^\/api\/tickets\/([^/]+)$/.exec(pathname);
     if (method === "PATCH" && tktMatch) {
+      const user = this.getActingUser(state, userId);
+      if (!this.hasPermission(state, userId, "manage_maintenance") && !this.hasPermission(state, userId, "execute_maintenance")) {
+        const msg = "\u0644\u064A\u0633\u062A \u0644\u062F\u064A\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u0639\u062F\u064A\u0644 \u0628\u0644\u0627\u063A\u0627\u062A \u0627\u0644\u0635\u064A\u0627\u0646\u0629";
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u062A\u0639\u062F\u064A\u0644 \u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629", "MaintenanceTicket", tktMatch[1], msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       const ticket = state.tickets.find((t) => t.id === tktMatch[1]);
       if (!ticket) throw new Error("\u0628\u0644\u0627\u063A \u0627\u0644\u0635\u064A\u0627\u0646\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      this.assertPropertyAccess(state, workspaceId, user, ticket.propertyId, "\u062A\u0639\u062F\u064A\u0644 \u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629", "MaintenanceTicket", ticket.id, deviceName);
       Object.assign(ticket, body, { updatedAt: now });
       this.bumpRevision(state, "tickets", ticket.id);
-      this.persistState(state);
-      return { ticket, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629", "\u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629", ticket.id, `\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0628\u0644\u0627\u063A ${ticket.ticketNumber}`, deviceName, ticket.propertyId);
+      this.persistState(state, workspaceId);
+      return { ticket, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/tasks") {
+      const user = this.assertPermission(state, workspaceId, userId, "manage_tasks", {
+        entityType: "TaskItem",
+        propertyId: body.propertyId ? String(body.propertyId) : void 0,
+        deviceName
+      });
+      if (body.propertyId) {
+        this.assertPropertyAccess(state, workspaceId, user, String(body.propertyId), "\u0625\u0636\u0627\u0641\u0629 \u0645\u0647\u0645\u0629", "TaskItem", String(body.propertyId), deviceName);
+      } else if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        const msg = "\u0631\u0641\u0636 \u0625\u0636\u0627\u0641\u0629 \u0645\u0647\u0645\u0629: \u062D\u0633\u0627\u0628\u0643 \u0645\u0642\u064A\u062F \u0628\u0640 0 \u0639\u0642\u0627\u0631";
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0625\u0636\u0627\u0641\u0629 \u0645\u0647\u0645\u0629 \u0628\u0645\u0635\u0641\u0648\u0641\u0629 \u0641\u0627\u0631\u063A\u0629", "TaskItem", "create", msg, { deviceName });
+        throw new WorkerPermissionDeniedError(msg);
+      }
       const task = {
         id: uid("tsk"),
         title: String(body.title || "\u0645\u0647\u0645\u0629 \u062C\u062F\u064A\u062F\u0629"),
         description: String(body.description || ""),
         type: String(body.type || "\u0645\u062A\u0627\u0628\u0639\u0629"),
+        propertyId: body.propertyId ? String(body.propertyId) : void 0,
+        unitId: body.unitId ? String(body.unitId) : void 0,
         priority: body.priority || "\u0645\u062A\u0648\u0633\u0637",
         assignedTo: String(body.assignedTo || userId),
         createdBy: userId,
@@ -3752,19 +5370,91 @@ var AqarWorkspaceDO = class extends DurableObject {
       };
       state.tasks.unshift(task);
       this.bumpRevision(state, "tasks", task.id);
-      this.persistState(state);
-      return { task, state: this.getStateForUser(state, userId) };
+      this.persistState(state, workspaceId);
+      return { task, state: this.getStateForUser(state, userId, workspaceId) };
     }
     const tskMatch = /^\/api\/tasks\/([^/]+)$/.exec(pathname);
     if (method === "PATCH" && tskMatch) {
+      const user = this.assertPermission(state, workspaceId, userId, "manage_tasks", {
+        entityType: "TaskItem",
+        entityId: tskMatch[1],
+        deviceName
+      });
       const task = state.tasks.find((t) => t.id === tskMatch[1]);
       if (!task) throw new Error("\u0627\u0644\u0645\u0647\u0645\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
+      if (task.propertyId) {
+        this.assertPropertyAccess(state, workspaceId, user, task.propertyId, "\u062A\u062D\u062F\u064A\u062B \u0645\u0647\u0645\u0629", "TaskItem", task.id, deviceName);
+      } else if (!userHasAllPropertiesAccess(state, user) && task.assignedTo !== user.id) {
+        throw new WorkerPermissionDeniedError("\u0631\u0641\u0636 \u062A\u062D\u062F\u064A\u062B \u0645\u0647\u0645\u0629 \u062E\u0627\u0631\u062C \u0646\u0637\u0627\u0642 \u062D\u0633\u0627\u0628\u0643");
+      }
       Object.assign(task, body);
       this.bumpRevision(state, "tasks", task.id);
-      this.persistState(state);
-      return { task, state: this.getStateForUser(state, userId) };
+      this.persistState(state, workspaceId);
+      return { task, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "POST" && pathname === "/api/documents") {
+      const user = this.assertModuleAction(state, workspaceId, userId, "documents", "create", {
+        entityType: "Document",
+        deviceName
+      });
+      if (body.propertyId) {
+        this.assertPropertyAccess(state, workspaceId, user, String(body.propertyId), "\u0623\u0631\u0634\u0641\u0629 \u0645\u0633\u062A\u0646\u062F", "Document", String(body.propertyId), deviceName);
+      } else if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        throw new WorkerPermissionDeniedError("\u0631\u0641\u0636 \u0631\u0641\u0639 \u0645\u0633\u062A\u0646\u062F: \u0644\u0627 \u062A\u0648\u062C\u062F \u0639\u0642\u0627\u0631\u0627\u062A \u0645\u0635\u0631\u062D \u0628\u0647\u0627 \u0641\u064A \u062D\u0633\u0627\u0628\u0643");
+      }
+      const doc = {
+        id: uid("doc"),
+        title: String(body.title || "\u0645\u0633\u062A\u0646\u062F"),
+        category: body.category || "\u0645\u0631\u0627\u0633\u0644\u0627\u062A \u0627\u0644\u0634\u0631\u0643\u0629",
+        relatedType: body.relatedType || body.relatedEntityType || (body.propertyId ? "\u0639\u0642\u0627\u0631" : "\u0634\u0631\u0643\u0629"),
+        relatedId: String(body.relatedId || body.relatedEntityId || body.propertyId || ""),
+        propertyId: body.propertyId ? String(body.propertyId) : void 0,
+        relatedEntityType: body.relatedEntityType ? String(body.relatedEntityType) : void 0,
+        relatedEntityId: body.relatedEntityId ? String(body.relatedEntityId) : void 0,
+        fileName: String(body.fileName || "file.pdf"),
+        fileType: String(body.fileType || "application/pdf"),
+        fileSizeKb: Number(body.fileSizeKb || 128),
+        version: Number(body.version || 1),
+        dataUrl: body.dataUrl ? String(body.dataUrl) : void 0,
+        uploadedBy: userId,
+        createdAt: now
+      };
+      state.documents.unshift(doc);
+      this.bumpRevision(state, "documents", doc.id);
+      this.appendAudit(state, userId, "\u0623\u0631\u0634\u0641\u0629 \u0645\u0633\u062A\u0646\u062F", "\u0645\u0633\u062A\u0646\u062F", doc.id, `\u0623\u0631\u0634\u0641\u0629 ${doc.title}`, deviceName, doc.propertyId);
+      this.persistState(state, workspaceId);
+      return { doc, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "POST" && pathname === "/api/vendors") {
+      const user = this.assertPermission(state, workspaceId, userId, "manage_maintenance", {
+        entityType: "Vendor",
+        deviceName
+      });
+      if (!userHasAllPropertiesAccess(state, user) && getAccessiblePropertyIdsSet(state, user).size === 0) {
+        throw new WorkerPermissionDeniedError("\u0631\u0641\u0636 \u0625\u0636\u0627\u0641\u0629 \u0645\u0648\u0631\u062F: \u062D\u0633\u0627\u0628\u0643 \u0645\u0642\u064A\u062F \u0628\u0640 0 \u0639\u0642\u0627\u0631");
+      }
+      const vendor = {
+        id: uid("vnd"),
+        nameAr: String(body.nameAr || "\u0645\u0648\u0631\u062F \u062C\u062F\u064A\u062F"),
+        nameEn: String(body.nameEn || body.nameAr || "New Vendor"),
+        crNumber: String(body.crNumber || ""),
+        category: String(body.category || body.specialty || "\u0635\u064A\u0627\u0646\u0629 \u0639\u0627\u0645\u0629"),
+        phone: String(body.phone || ""),
+        email: String(body.email || ""),
+        rating: Number(body.rating ?? 5),
+        active: body.active !== void 0 ? Boolean(body.active) : true
+      };
+      state.vendors.unshift(vendor);
+      this.bumpRevision(state, "vendors", vendor.id);
+      this.persistState(state, workspaceId);
+      return { vendor, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/templates") {
+      const user = this.getActingUser(state, userId);
+      if (!this.hasPermission(state, userId, "manage_users") && !this.hasPermission(state, userId, "manage_contracts") && !this.hasPermission(state, userId, "manage_maintenance")) {
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u0625\u0646\u0634\u0627\u0621 \u0642\u0627\u0644\u0628 \u062A\u0648\u0627\u0635\u0644", "Template", "create", "\u0644\u064A\u0633\u062A \u0644\u062F\u064A\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0625\u0646\u0634\u0627\u0621 \u0642\u0648\u0627\u0644\u0628 \u0627\u0644\u062A\u0648\u0627\u0635\u0644", { deviceName });
+        throw new WorkerPermissionDeniedError("\u0644\u064A\u0633\u062A \u0644\u062F\u064A\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u0625\u0646\u0634\u0627\u0621 \u0642\u0648\u0627\u0644\u0628 \u0627\u0644\u062A\u0648\u0627\u0635\u0644");
+      }
       const template = {
         id: uid("tpl"),
         name: String(body.name || "\u0642\u0627\u0644\u0628 \u062C\u062F\u064A\u062F"),
@@ -3779,28 +5469,326 @@ var AqarWorkspaceDO = class extends DurableObject {
       };
       state.communicationTemplates = [template, ...state.communicationTemplates || []];
       this.bumpRevision(state, "communicationTemplates", template.id);
-      this.persistState(state);
-      return { template, state: this.getStateForUser(state, userId) };
+      this.persistState(state, workspaceId);
+      return { template, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/notifications/read") {
       state.notifications = state.notifications.map((n) => ({
         ...n,
         isReadBy: n.isReadBy.includes(userId) ? n.isReadBy : [...n.isReadBy, userId]
       }));
-      this.persistState(state);
-      return { ok: true, state: this.getStateForUser(state, userId) };
+      this.persistState(state, workspaceId);
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/permissions/toggle") {
-      this.assertPermission(state, userId, "manage_users");
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "manage", {
+        entityType: "RolePermissions",
+        entityId: String(body.role || "role"),
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner" && actorUser.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u062A\u0639\u062F\u064A\u0644 \u0645\u0635\u0641\u0648\u0641\u0629 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0645\u062D\u0635\u0648\u0631 \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0627\u0644\u0645\u062F\u064A\u0631 \u0627\u0644\u0639\u0627\u0645");
+      }
       const role = body.role;
       const perm = body.permission;
+      if (role === "sys_owner") {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0642\u0644\u064A\u0635 \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+      }
+      if (actorUser.role === "gm" && role === "gm") {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u062A\u0639\u062F\u064A\u0644 \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u062F\u0648\u0631\u0643 \u0628\u0646\u0641\u0633\u0643");
+      }
       const current = state.rolePermissions[role] || [];
       state.rolePermissions[role] = current.includes(perm) ? current.filter((p) => p !== perm) : [...current, perm];
-      this.persistState(state);
-      return { rolePermissions: state.rolePermissions, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0627\u0644\u062F\u0648\u0631", "\u0623\u062F\u0648\u0627\u0631 \u0648\u0635\u0644\u0627\u062D\u064A\u0627\u062A", role, `\u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0629 ${perm} \u0644\u0644\u062F\u0648\u0631 ${role}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { rolePermissions: state.rolePermissions, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "POST" && pathname === "/api/team/users") {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "create", {
+        entityType: "StaffUser",
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner" && actorUser.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 \u0645\u062A\u0627\u062D\u0629 \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629 \u0641\u0642\u0637");
+      }
+      const targetRole = body.role || "leasing";
+      if (actorUser.role !== "sys_owner" && (targetRole === "sys_owner" || targetRole === "gm")) {
+        throw new WorkerPermissionDeniedError("\u062A\u0639\u064A\u064A\u0646 \u0645\u0627\u0644\u0643 \u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0634\u0631\u0643\u0629 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+      }
+      const tmpl = ROLE_TEMPLATES.find((t) => t.key === targetRole);
+      const customRole = body.customRoleId ? (state.customRoles || []).find((r) => r.id === body.customRoleId) : void 0;
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!email) throw new Error("\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0645\u0637\u0644\u0648\u0628");
+      if (state.users.some((u) => u.email.toLowerCase() === email)) {
+        throw new Error("\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0645\u0633\u062A\u062E\u062F\u0645 \u0644\u062D\u0633\u0627\u0628 \u0622\u062E\u0631");
+      }
+      const allowedProps = this.normalizeAllowedPropertiesInput(body.allowedPropertyIds);
+      const newUser = {
+        id: uid("usr"),
+        companyId: actorUser.role === "sys_owner" ? String(body.companyId || actorUser.companyId || `comp-${workspaceId}`) : actorUser.companyId,
+        nameAr: String(body.nameAr || "\u0645\u0648\u0638\u0641 \u062C\u062F\u064A\u062F").trim(),
+        nameEn: String(body.nameEn || body.nameAr || "New Staff").trim(),
+        email,
+        phone: String(body.phone || "").trim(),
+        role: targetRole,
+        customRoleId: customRole?.id || (body.customRoleId ? String(body.customRoleId) : void 0),
+        customModulePermissions: body.customModulePermissions ?? body.customPermissions,
+        roleLabelAr: customRole?.nameAr || tmpl?.labelAr || "\u0645\u0648\u0638\u0641",
+        roleLabelEn: customRole?.nameEn || tmpl?.labelEn || "Staff",
+        approvalLimitSar: Number(body.approvalLimitSar ?? tmpl?.defaultLimitSar ?? 0),
+        allowedPropertyIds: allowedProps,
+        deviceName: String(body.deviceName || "Web Terminal"),
+        lastActiveAt: now,
+        statusState: "\u0645\u062A\u0635\u0644",
+        active: true,
+        accountStatus: "\u0646\u0634\u0637",
+        createdAt: now
+      };
+      state.users.push(newUser);
+      const password = String(body.password || "").trim() || randomHexWeb(18);
+      const pin = String(body.pin || "").trim();
+      const pwHash = await hashSecretWeb(password);
+      const pinHash = /^\d{4,6}$/.test(pin) ? await hashSecretWeb(pin) : null;
+      this.ctx.storage.sql.exec(
+        "INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)",
+        newUser.id,
+        pwHash,
+        pinHash,
+        now
+      );
+      this.bumpRevision(state, "users", newUser.id);
+      this.appendAudit(state, userId, "\u0625\u0636\u0627\u0641\u0629 \u0645\u0648\u0638\u0641 \u062C\u062F\u064A\u062F", "\u0641\u0631\u064A\u0642 \u0627\u0644\u0639\u0645\u0644", newUser.id, `\u0625\u0636\u0627\u0641\u0629 ${newUser.nameAr} (${newUser.role})`, deviceName);
+      this.persistState(state, workspaceId);
+      return { user: sanitizeUserForClient(newUser), state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    const teamUserMatch = /^\/api\/team\/users\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && teamUserMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "edit", {
+        entityType: "StaffUser",
+        entityId: teamUserMatch[1],
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner" && actorUser.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u062A\u0639\u062F\u064A\u0644 \u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629");
+      }
+      const target = state.users.find((u) => u.id === teamUserMatch[1]);
+      if (!target) throw new Error("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      if (actorUser.role !== "sys_owner" && (target.role === "sys_owner" || target.role === "gm")) {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u062A\u0639\u062F\u064A\u0644 \u062D\u0633\u0627\u0628 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629");
+      }
+      if (actorUser.role === "gm" && actorUser.companyId && target.companyId && actorUser.companyId !== target.companyId) {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u062A\u0639\u062F\u064A\u0644 \u0645\u0648\u0638\u0641 \u064A\u062A\u0628\u0639 \u0634\u0631\u0643\u0629 \u0623\u062E\u0631\u0649");
+      }
+      if (target.id === actorUser.id && (body.role !== void 0 || body.customRoleId !== void 0 || body.customModulePermissions !== void 0 || body.customPermissions !== void 0 || body.active === false)) {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u062A\u0639\u062F\u064A\u0644 \u062F\u0648\u0631\u0643 \u0623\u0648 \u0635\u0644\u0627\u062D\u064A\u0627\u062A\u0643 \u0627\u0644\u062E\u0627\u0635\u0629");
+      }
+      const prevTargetSnapshot = {
+        ...target,
+        allowedPropertyIds: Array.isArray(target.allowedPropertyIds) ? [...target.allowedPropertyIds] : void 0
+      };
+      const prevRole = target.role;
+      const nextRole = body.role ?? target.role;
+      const nextCustomRoleId = body.customRoleId !== void 0 ? body.customRoleId ? String(body.customRoleId) : void 0 : target.customRoleId;
+      const nextScope = body.allowedPropertyIds !== void 0 ? this.normalizeAllowedPropertiesInput(body.allowedPropertyIds) : target.allowedPropertyIds;
+      const nextActive = body.active !== void 0 ? Boolean(body.active) : target.active;
+      const nextStatus = body.accountStatus || (nextActive ? "\u0646\u0634\u0637" : "\u0645\u0648\u0642\u0648\u0641");
+      if (actorUser.role !== "sys_owner" && (nextRole === "sys_owner" || nextRole === "gm")) {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0644\u0643 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u0631\u0642\u064A\u0629 \u0645\u0648\u0638\u0641 \u0644\u062F\u0648\u0631 \u0642\u064A\u0627\u062F\u064A");
+      }
+      target.role = nextRole;
+      target.customRoleId = nextCustomRoleId;
+      if (body.customModulePermissions !== void 0 || body.customPermissions !== void 0) {
+        target.customModulePermissions = body.customModulePermissions ?? body.customPermissions;
+      }
+      if (body.allowedPropertyIds !== void 0) target.allowedPropertyIds = nextScope;
+      if (body.approvalLimitSar !== void 0) target.approvalLimitSar = Number(body.approvalLimitSar);
+      if (body.nameAr !== void 0) target.nameAr = String(body.nameAr);
+      if (body.nameEn !== void 0) target.nameEn = String(body.nameEn);
+      target.active = nextActive && nextStatus === "\u0646\u0634\u0637";
+      target.accountStatus = nextStatus;
+      const roleChanged = isRoleDowngrade(prevRole, nextRole) || prevRole !== nextRole;
+      const scopeShrank = isPropertyScopeShrink(state, prevTargetSnapshot, state, target);
+      const suspended = !target.active;
+      if (suspended || roleChanged || scopeShrank) {
+        this.revokeUserSessions(
+          target.id,
+          workspaceId,
+          suspended ? "\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0646 \u0642\u0650\u0628\u0644 \u0627\u0644\u0625\u062F\u0627\u0631\u0629" : "\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0623\u0648 \u0646\u0637\u0627\u0642 \u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A \u2014 \u064A\u0631\u062C\u0649 \u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644"
+        );
+      }
+      this.bumpRevision(state, "users", target.id);
+      this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u0641 \u0645\u0648\u0638\u0641", "\u0641\u0631\u064A\u0642 \u0627\u0644\u0639\u0645\u0644", target.id, `\u062A\u062D\u062F\u064A\u062B ${target.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { user: sanitizeUserForClient(target), state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "DELETE" && teamUserMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "delete_void", {
+        entityType: "StaffUser",
+        entityId: teamUserMatch[1],
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner") {
+        throw new WorkerPermissionDeniedError("\u062D\u0630\u0641 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645\u064A\u0646 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0641\u0642\u0637");
+      }
+      const target = state.users.find((u) => u.id === teamUserMatch[1]);
+      if (!target) throw new Error("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      if (target.id === actorUser.id) throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u062D\u0630\u0641 \u062D\u0633\u0627\u0628\u0643 \u0627\u0644\u062D\u0627\u0644\u064A");
+      state.users = state.users.filter((u) => u.id !== target.id);
+      this.ctx.storage.sql.exec("DELETE FROM user_credentials WHERE user_id = ?", target.id);
+      this.revokeUserSessions(target.id, workspaceId, "\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u0633\u0627\u0628 \u0628\u0648\u0627\u0633\u0637\u0629 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+      this.appendAudit(state, userId, "\u062D\u0630\u0641 \u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641", "\u0641\u0631\u064A\u0642 \u0627\u0644\u0639\u0645\u0644", target.id, `\u062D\u0630\u0641 ${target.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "POST" && pathname === "/api/roles") {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "manage", {
+        entityType: "CustomRole",
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner" && actorUser.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u062F\u0648\u0627\u0631 \u0627\u0644\u0645\u062E\u0635\u0635\u0629 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629");
+      }
+      const roleDef = {
+        id: uid("role"),
+        companyId: String(body.companyId || actorUser.companyId || state.companies?.[0]?.id || `comp-${workspaceId}`),
+        nameAr: String(body.nameAr || "\u062F\u0648\u0631 \u0645\u062E\u0635\u0635"),
+        nameEn: String(body.nameEn || body.nameAr || "Custom Role"),
+        descriptionAr: String(body.descriptionAr || body.descAr || ""),
+        baseRoleKey: body.baseRoleKey || body.baseRole || "leasing",
+        legacyPermissions: Array.isArray(body.legacyPermissions) ? body.legacyPermissions : [],
+        modulePermissions: body.modulePermissions || {},
+        createdAt: now,
+        updatedAt: now,
+        createdBy: userId
+      };
+      if (!state.customRoles) state.customRoles = [];
+      state.customRoles.push(roleDef);
+      this.bumpRevision(state, "customRoles", roleDef.id);
+      this.appendAudit(state, userId, "\u0625\u0646\u0634\u0627\u0621 \u062F\u0648\u0631 \u0645\u062E\u0635\u0635", "\u0623\u062F\u0648\u0627\u0631 \u0648\u0635\u0644\u0627\u062D\u064A\u0627\u062A", roleDef.id, `\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062F\u0648\u0631 ${roleDef.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { role: roleDef, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    const roleItemMatch = /^\/api\/roles\/([^/]+)$/.exec(pathname);
+    if (method === "PATCH" && roleItemMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "manage", {
+        entityType: "CustomRole",
+        entityId: roleItemMatch[1],
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner" && actorUser.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0623\u062F\u0648\u0627\u0631 \u0627\u0644\u0645\u062E\u0635\u0635\u0629 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629");
+      }
+      const roleDef = (state.customRoles || []).find((r) => r.id === roleItemMatch[1]);
+      if (!roleDef) throw new Error("\u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      Object.assign(roleDef, {
+        nameAr: body.nameAr ?? roleDef.nameAr,
+        nameEn: body.nameEn ?? roleDef.nameEn,
+        descriptionAr: body.descriptionAr ?? body.descAr ?? roleDef.descriptionAr,
+        modulePermissions: body.modulePermissions ?? roleDef.modulePermissions,
+        legacyPermissions: Array.isArray(body.legacyPermissions) ? body.legacyPermissions : roleDef.legacyPermissions,
+        updatedAt: now
+      });
+      this.bumpRevision(state, "customRoles", roleDef.id);
+      this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u062F\u0648\u0631 \u0645\u062E\u0635\u0635", "\u0623\u062F\u0648\u0627\u0631 \u0648\u0635\u0644\u0627\u062D\u064A\u0627\u062A", roleDef.id, `\u062A\u062D\u062F\u064A\u062B ${roleDef.nameAr}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { role: roleDef, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "DELETE" && roleItemMatch) {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "manage", {
+        entityType: "CustomRole",
+        entityId: roleItemMatch[1],
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner") {
+        throw new WorkerPermissionDeniedError("\u062D\u0630\u0641 \u0627\u0644\u0623\u062F\u0648\u0627\u0631 \u0627\u0644\u0645\u062E\u0635\u0635\u0629 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+      }
+      state.customRoles = (state.customRoles || []).filter((r) => r.id !== roleItemMatch[1]);
+      this.appendAudit(state, userId, "\u062D\u0630\u0641 \u062F\u0648\u0631 \u0645\u062E\u0635\u0635", "\u0623\u062F\u0648\u0627\u0631 \u0648\u0635\u0644\u0627\u062D\u064A\u0627\u062A", roleItemMatch[1], "\u062D\u0630\u0641 \u062F\u0648\u0631 \u0645\u062E\u0635\u0635", deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "POST" && pathname === "/api/roles/module-matrix") {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "manage", {
+        entityType: "RoleMatrix",
+        entityId: String(body.role || ""),
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner" && actorUser.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u062A\u0639\u062F\u064A\u0644 \u0645\u0635\u0641\u0648\u0641\u0629 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629");
+      }
+      const targetRole = body.role;
+      if (targetRole === "sys_owner") {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u0639\u062F\u064A\u0644 \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+      }
+      if (actorUser.role === "gm" && targetRole === "gm") {
+        throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u062A\u0639\u062F\u064A\u0644 \u0645\u0635\u0641\u0648\u0641\u0629 \u062F\u0648\u0631\u0643 \u0628\u0646\u0641\u0633\u0643");
+      }
+      if (!state.roleModulePermissions) state.roleModulePermissions = buildAllDefaultRoleModulePermissions();
+      state.roleModulePermissions[targetRole] = body.modulePermissions || {};
+      state.rolePermissions[targetRole] = deriveLegacyPermissionsFromModules(body.modulePermissions || {});
+      this.appendAudit(state, userId, "\u062A\u062D\u062F\u064A\u062B \u0645\u0635\u0641\u0648\u0641\u0629 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A", "\u0623\u062F\u0648\u0627\u0631 \u0648\u0635\u0644\u0627\u062D\u064A\u0627\u062A", targetRole, `\u062A\u062D\u062F\u064A\u062B \u0645\u0635\u0641\u0648\u0641\u0629 ${targetRole}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { roleModulePermissions: state.roleModulePermissions, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    if (method === "POST" && pathname === "/api/team/sessions/terminate") {
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "team", "manage", {
+        entityType: "StaffSession",
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner" && actorUser.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u0625\u0646\u0647\u0627\u0621 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0639\u0646 \u0628\u064F\u0639\u062F \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629");
+      }
+      const targetUserId = body.userId ? String(body.userId) : void 0;
+      const targetSessionId = body.sessionId ? String(body.sessionId) : void 0;
+      let terminatedCount = 0;
+      if (targetUserId) {
+        const target = state.users.find((u) => u.id === targetUserId);
+        if (!target) throw new Error("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+        if (actorUser.role === "gm" && (target.role === "sys_owner" || target.role === "gm")) {
+          throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u0625\u0646\u0647\u0627\u0621 \u062C\u0644\u0633\u0627\u062A \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0634\u0631\u0643\u0629");
+        }
+        if (actorUser.role === "gm" && actorUser.companyId && target.companyId && actorUser.companyId !== target.companyId) {
+          throw new WorkerPermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646\u0643 \u0625\u0646\u0647\u0627\u0621 \u062C\u0644\u0633\u0627\u062A \u0645\u0648\u0638\u0641 \u064A\u062A\u0628\u0639 \u0634\u0631\u0643\u0629 \u0623\u062E\u0631\u0649");
+        }
+        if (!targetSessionId) {
+          terminatedCount = this.revokeUserSessions(targetUserId, workspaceId, String(body.reason || "\u0625\u0646\u0647\u0627\u0621 \u062C\u0644\u0633\u0629 \u0625\u062F\u0627\u0631\u064A \u0639\u0646 \u0628\u064F\u0639\u062F"));
+        } else {
+          this.ctx.storage.sql.exec("UPDATE sessions SET revoked = 1 WHERE user_id = ? AND token_id = ?", targetUserId, targetSessionId);
+          terminatedCount = this.disconnectUserWebSockets(targetUserId, workspaceId, String(body.reason || "\u0625\u0646\u0647\u0627\u0621 \u062C\u0644\u0633\u0629 \u0625\u062F\u0627\u0631\u064A \u0639\u0646 \u0628\u064F\u0639\u062F"), targetSessionId);
+        }
+      }
+      this.appendAudit(state, userId, "\u0625\u0646\u0647\u0627\u0621 \u062C\u0644\u0633\u0627\u062A \u0639\u0646 \u0628\u064F\u0639\u062F", "\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0623\u0645\u0627\u0646", targetUserId || targetSessionId || "session", `\u0625\u0646\u0647\u0627\u0621 ${terminatedCount} \u062C\u0644\u0633\u0629`, deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, terminatedCount, state: this.getStateForUser(state, userId, workspaceId) };
+    }
+    const resolveConflictMatch = /^\/api\/(?:team|sync)\/conflicts\/([^/]+)\/resolve$/.exec(pathname);
+    if (method === "POST" && resolveConflictMatch) {
+      const user = this.assertModuleAction(state, workspaceId, userId, "team", "manage", {
+        entityType: "SyncConflict",
+        entityId: resolveConflictMatch[1],
+        deviceName
+      });
+      if (user.role !== "sys_owner" && user.role !== "gm") {
+        throw new WorkerPermissionDeniedError("\u0627\u0639\u062A\u0645\u0627\u062F \u062D\u0644 \u062A\u0639\u0627\u0631\u0636\u0627\u062A \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0645\u062A\u0627\u062D \u0641\u0642\u0637 \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0627\u0644\u0645\u062F\u064A\u0631 \u0627\u0644\u0639\u0627\u0645");
+      }
+      const cnf = (state.syncConflicts || []).find((c) => c.id === resolveConflictMatch[1]);
+      if (!cnf) throw new Error("\u0633\u062C\u0644 \u0627\u0644\u062A\u0639\u0627\u0631\u0636 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      const resolution = body.resolution === "\u062A\u0645 \u0627\u0644\u0625\u0628\u0642\u0627\u0621 \u0639\u0644\u0649 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0633\u0627\u0628\u0642\u0629" || body.choice === "first" ? "\u062A\u0645 \u0627\u0644\u0625\u0628\u0642\u0627\u0621 \u0639\u0644\u0649 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0633\u0627\u0628\u0642\u0629" : "\u062A\u0645 \u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0623\u062D\u062F\u062B";
+      cnf.status = resolution;
+      cnf.resolvedBy = user.nameAr || userId;
+      cnf.resolvedAt = now;
+      this.appendAudit(state, userId, "\u062D\u0644 \u062A\u0639\u0627\u0631\u0636 \u0645\u0632\u0627\u0645\u0646\u0629", "\u0646\u0638\u0627\u0645", cnf.id, `\u0645\u0639\u0627\u0644\u062C\u0629 \u062A\u0639\u0627\u0631\u0636 ${cnf.entityLabel}`, deviceName);
+      this.persistState(state, workspaceId);
+      return { conflict: cnf, state: this.getStateForUser(state, userId, workspaceId) };
     }
     if (method === "POST" && pathname === "/api/workspace/reset-fresh") {
-      this.assertPermission(state, userId, "backup_restore");
+      const actorUser = this.assertModuleAction(state, workspaceId, userId, "settings", "manage", {
+        entityType: "WorkspaceReset",
+        deviceName
+      });
+      if (actorUser.role !== "sys_owner") {
+        throw new WorkerPermissionDeniedError("\u0625\u0639\u0627\u062F\u0629 \u062A\u0647\u064A\u0626\u0629 \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u062D\u0635\u0631\u064A\u0629 \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0641\u0642\u0637");
+      }
       state.properties = [];
       state.units = [];
       state.tenants = [];
@@ -3812,25 +5800,29 @@ var AqarWorkspaceDO = class extends DurableObject {
       state.tickets = [];
       state.tasks = [];
       state.documents = [];
-      this.persistState(state);
-      return { ok: true, state: this.getStateForUser(state, userId) };
+      this.appendAudit(state, userId, "\u062A\u0647\u064A\u0626\u0629 \u0645\u0633\u0627\u062D\u0629 \u0639\u0645\u0644 \u0646\u0638\u064A\u0641\u0629", "\u0627\u0644\u0646\u0638\u0627\u0645", "workspace-reset", "\u0645\u0633\u062D \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062A\u0634\u063A\u064A\u0644\u064A\u0629 \u0645\u0639 \u0627\u0644\u0625\u0628\u0642\u0627\u0621 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642", deviceName);
+      this.persistState(state, workspaceId);
+      return { ok: true, state: this.getStateForUser(state, userId, workspaceId) };
     }
     throw new Error(`\u0645\u0633\u0627\u0631 \u063A\u064A\u0631 \u0645\u062F\u0639\u0648\u0645 \u0628\u0639\u062F \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645 \u0627\u0644\u0633\u062D\u0627\u0628\u064A: ${method} ${pathname}`);
   }
   async fetch(request) {
     const url = new URL(request.url);
     const pathname = url.pathname;
-    const state = await this.ensureBootstrapped();
+    const workspaceId = resolveRequestWorkspace(request);
+    const state = await this.ensureBootstrapped(workspaceId);
+    const secureReq = isSecureRequest(request);
     if (pathname === "/ws") {
       if (request.headers.get("Upgrade") !== "websocket") {
         return new Response("Expected WebSocket upgrade", { status: 426 });
       }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      const actor2 = await this.resolveActor(request, state);
+      const actor2 = await this.resolveActor(request, state, workspaceId);
       const attachment = {
         sessionId: actor2?.sessionId || uid("ws"),
         userId: actor2?.userId || "",
+        workspaceId,
         authenticated: Boolean(actor2),
         deviceName: actor2?.deviceName || "Web Terminal",
         connectedAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -3841,7 +5833,7 @@ var AqarWorkspaceDO = class extends DurableObject {
         server.send(
           JSON.stringify({
             type: "state:init",
-            state: this.getStateForUser(state, attachment.userId),
+            state: this.getStateForUser(state, attachment.userId, workspaceId),
             presence: this.getPresenceList(state)
           })
         );
@@ -3849,22 +5841,115 @@ var AqarWorkspaceDO = class extends DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
     if (pathname === "/api/health") {
+      const entitiesRow = this.ctx.storage.sql.exec("SELECT COUNT(*) as c FROM entities").toArray()[0];
+      const opsRow = this.ctx.storage.sql.exec("SELECT COUNT(*) as c FROM operations_log").toArray()[0];
       return jsonResponse({
         ok: true,
         runtime: "cloudflare-workers-durable-objects",
+        storageEngine: "do-sqlite-normalized",
+        workspaceId,
+        entitiesCount: entitiesRow?.c || 0,
+        operationsCount: opsRow?.c || 0,
         lastUpdatedAt: state.lastUpdatedAt,
         syncRevision: state.syncRevision || 1
       });
     }
+    if (pathname === "/api/workspaces/provision" && request.method === "POST") {
+      if (workspaceId === "default" || state.users.length > 0) {
+        return jsonResponse(
+          { error: "\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u0647\u0630\u0647 \u0645\u0641\u0639\u0651\u0644\u0629 \u0645\u0633\u0628\u0642\u0627\u064B \u2014 \u0627\u062E\u062A\u0631 \u0645\u0639\u0631\u0651\u0641 \u0634\u0631\u0643\u0629 \u0645\u062E\u062A\u0644\u0641\u0627\u064B \u0623\u0648 \u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644" },
+          409
+        );
+      }
+      const body = await request.json().catch(() => ({}));
+      const companyNameAr = String(body.companyNameAr || "").trim();
+      const companyNameEn = String(body.companyNameEn || companyNameAr || "AqarPlus Workspace").trim();
+      const adminNameAr = String(body.adminNameAr || "").trim();
+      const adminEmail = String(body.adminEmail || "").trim().toLowerCase();
+      const adminPhone = String(body.adminPhone || "").trim();
+      const password = String(body.password || "");
+      const pin = String(body.pin || "").trim();
+      const appType = body.appType === "desktop" ? "desktop" : "web";
+      if (!companyNameAr || !adminNameAr || !adminEmail || password.length < 8) {
+        return jsonResponse(
+          { error: "\u064A\u0644\u0632\u0645 \u0625\u062F\u062E\u0627\u0644 \u0627\u0633\u0645 \u0627\u0644\u0634\u0631\u0643\u0629\u060C \u0648\u0627\u0633\u0645 \u0627\u0644\u0645\u062F\u064A\u0631\u060C \u0648\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A\u060C \u0648\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0642\u0648\u064A\u0629 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641" },
+          400
+        );
+      }
+      if (pin && !/^\d{4,6}$/.test(pin)) {
+        return jsonResponse({ error: "\u0631\u0645\u0632 PIN \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0643\u0648\u0646 \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645 \u0641\u0642\u0637" }, 400);
+      }
+      const fresh = this.createEmptyWorkspaceSeed(workspaceId, companyNameAr, companyNameEn);
+      const adminId = `usr-${workspaceId}-owner`;
+      const provNow = (/* @__PURE__ */ new Date()).toISOString();
+      const adminUser = {
+        id: adminId,
+        companyId: `comp-${workspaceId}`,
+        nameAr: adminNameAr,
+        nameEn: adminNameAr,
+        email: adminEmail,
+        phone: adminPhone,
+        role: "sys_owner",
+        roleLabelAr: "\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645",
+        roleLabelEn: "System Owner",
+        approvalLimitSar: 1e7,
+        deviceName: String(body.deviceName || "Web Terminal"),
+        lastActiveAt: provNow,
+        statusState: "\u0645\u062A\u0635\u0644",
+        active: true,
+        accountStatus: "\u0646\u0634\u0637",
+        security: {
+          hasPin: Boolean(pin),
+          lastPasswordChangedAt: provNow
+        }
+      };
+      fresh.users.push(adminUser);
+      this.stateCache = fresh;
+      this.saveNormalizedState(fresh, workspaceId);
+      const pwHash = await hashSecretWeb(password);
+      const pinHash = pin ? await hashSecretWeb(pin) : null;
+      this.ctx.storage.sql.exec(
+        "INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)",
+        adminId,
+        pwHash,
+        pinHash,
+        provNow
+      );
+      const session = await this.issueSession(adminUser, workspaceId, adminUser.deviceName, {
+        rememberMe: body.rememberMe !== false,
+        appType,
+        secure: secureReq
+      });
+      const userState = this.getStateForUser(fresh, adminUser.id, workspaceId);
+      return jsonResponse(
+        {
+          ok: true,
+          workspaceId,
+          authenticated: true,
+          user: sanitizeUserForClient(adminUser),
+          token: session.token,
+          ...appType === "desktop" && session.refreshToken ? { refreshToken: session.refreshToken } : {},
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
+          landingNav: getRecommendedLandingNav(userState, adminUser),
+          allowedNavs: getAllowedNavsForUser(userState, adminUser),
+          state: userState
+        },
+        201,
+        session.headers
+      );
+    }
     if (pathname === "/api/auth/session" && request.method === "GET") {
-      const demoLoginEnabled = this.env.AQAR_DEMO_LOGIN !== "false";
-      const actor2 = await this.resolveActor(request, state);
+      const demoLoginEnabled = this.env.AQAR_DEMO_LOGIN === "true";
+      const actor2 = await this.resolveActor(request, state, workspaceId);
       const companyBranding = {
         nameAr: state.settings.nameAr,
         nameEn: state.settings.nameEn,
-        logoDataUrl: state.settings.logoDataUrl
+        logoDataUrl: state.settings.logoDataUrl,
+        workspaceId
       };
-      const loginProfiles = demoLoginEnabled ? state.users.filter((u) => u.active).map((u) => ({
+      const loginProfiles = demoLoginEnabled ? state.users.filter((u) => isUserAccountActive(u)).map((u) => ({
         id: u.id,
         nameAr: u.nameAr,
         nameEn: u.nameEn,
@@ -3874,13 +5959,26 @@ var AqarWorkspaceDO = class extends DurableObject {
         email: u.email
       })) : [];
       if (!actor2) {
-        return jsonResponse({ authenticated: false, demoLoginEnabled, loginProfiles, companyBranding });
+        return jsonResponse({
+          authenticated: false,
+          workspaceId,
+          workspaceExists: state.users.length > 0 || workspaceId === "default",
+          demoLoginEnabled,
+          loginProfiles,
+          companyBranding
+        });
       }
       const user = state.users.find((u) => u.id === actor2.userId);
+      const userState = this.getStateForUser(state, actor2.userId, workspaceId);
       return jsonResponse({
         authenticated: true,
-        user,
+        workspaceId,
+        workspaceExists: true,
+        user: user ? sanitizeUserForClient(user) : void 0,
         token: actor2.rawToken,
+        sessionId: actor2.sessionId,
+        landingNav: getRecommendedLandingNav(userState, user),
+        allowedNavs: getAllowedNavsForUser(userState, user),
         demoLoginEnabled,
         loginProfiles,
         companyBranding
@@ -3890,37 +5988,183 @@ var AqarWorkspaceDO = class extends DurableObject {
       const body = await request.json().catch(() => ({}));
       const identifier = String(body.identifier || body.email || body.userId || "").trim().toLowerCase();
       const password = String(body.password || "");
+      const appType = body.appType === "desktop" ? "desktop" : "web";
+      const rememberMe = body.rememberMe !== false;
       const phoneNeedle = normalizePhone(identifier);
       const user = state.users.find(
-        (u) => u.active && (u.id.toLowerCase() === identifier || u.email.toLowerCase() === identifier || phoneNeedle.length >= 6 && normalizePhone(u.phone) === phoneNeedle)
+        (u) => u.id.toLowerCase() === identifier || u.email.toLowerCase() === identifier || u.username && u.username.toLowerCase() === identifier || phoneNeedle.length >= 6 && normalizePhone(u.phone) === phoneNeedle
       );
-      if (!user) return jsonResponse({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" }, 401);
-      const cred = this.ctx.storage.sql.exec("SELECT password_hash FROM user_credentials WHERE user_id = ?", user.id).toArray()[0];
-      if (!cred || !await verifySecretWeb(password, cred.password_hash)) {
+      if (!user) {
+        this.recordDeniedAccess(state, workspaceId, void 0, "\u0641\u0634\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644", "AuthLogin", identifier || "unknown", "\u0645\u062D\u0627\u0648\u0644\u0629 \u062F\u062E\u0648\u0644 \u0628\u0628\u0631\u064A\u062F/\u0645\u0639\u0631\u0641 \u063A\u064A\u0631 \u0645\u0633\u062C\u0644", {
+          deviceName: String(body.deviceName || "Web Terminal")
+        });
         return jsonResponse({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" }, 401);
       }
-      const { token, cookieHeader } = await this.issueSession(user, String(body.deviceName || "Web Terminal"));
+      if (!isUserAccountActive(user)) {
+        this.recordDeniedAccess(state, workspaceId, user, "\u0631\u0641\u0636 \u062F\u062E\u0648\u0644 \u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0646\u0634\u0637", "AuthLogin", user.id, `\u0645\u062D\u0627\u0648\u0644\u0629 \u062F\u062E\u0648\u0644 \u0644\u062D\u0633\u0627\u0628 \u0628\u062D\u0627\u0644\u0629 ${user.accountStatus || "\u0645\u0648\u0642\u0648\u0641"}`, {
+          deviceName: String(body.deviceName || "Web Terminal")
+        });
+        return jsonResponse({ error: "\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0623\u0648 \u0644\u0645 \u064A\u062A\u0645 \u062A\u0641\u0639\u064A\u0644\u0647 \u0628\u0639\u062F" }, 401);
+      }
+      const lockStatus = this.checkAccountLock(user.id);
+      if (lockStatus.locked) {
+        return jsonResponse(
+          { error: `\u062A\u0645 \u0642\u0641\u0644 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0624\u0642\u062A\u0627\u064B \u0644\u0643\u062B\u0631\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062E\u0627\u0637\u0626\u0629. \u062D\u0627\u0648\u0644 \u0628\u0639\u062F ${lockStatus.retryAfterSec} \u062B\u0627\u0646\u064A\u0629.` },
+          429
+        );
+      }
+      const cred = this.ctx.storage.sql.exec("SELECT password_hash FROM user_credentials WHERE user_id = ?", user.id).toArray()[0];
+      if (!cred || !cred.password_hash || !await verifySecretWeb(password, cred.password_hash)) {
+        this.recordFailedAttempt(user.id);
+        this.recordDeniedAccess(state, workspaceId, user, "\u0641\u0634\u0644 \u062A\u062D\u0642\u0642 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", "AuthLogin", user.id, "\u0645\u062D\u0627\u0648\u0644\u0629 \u062F\u062E\u0648\u0644 \u0628\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u062E\u0627\u0637\u0626\u0629", {
+          deviceName: String(body.deviceName || "Web Terminal")
+        });
+        return jsonResponse({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" }, 401);
+      }
+      this.clearFailedAttempts(user.id);
+      const session = await this.issueSession(user, workspaceId, String(body.deviceName || "Web Terminal"), {
+        rememberMe,
+        appType,
+        secure: secureReq
+      });
+      const userState = this.getStateForUser(state, user.id, workspaceId);
       return jsonResponse(
-        { authenticated: true, user, token, state: this.getStateForUser(state, user.id) },
+        {
+          authenticated: true,
+          workspaceId,
+          user: sanitizeUserForClient(user),
+          token: session.token,
+          ...appType === "desktop" && session.refreshToken ? { refreshToken: session.refreshToken } : {},
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
+          rememberMe: session.rememberMe,
+          landingNav: getRecommendedLandingNav(userState, user),
+          allowedNavs: getAllowedNavsForUser(userState, user),
+          state: userState
+        },
         200,
-        { "Set-Cookie": cookieHeader }
+        session.headers
       );
     }
     if (pathname === "/api/auth/login-pin" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const userId = String(body.userId || "usr-sys_owner");
+      const identifier = String(body.userId || body.identifier || "").trim().toLowerCase();
       const pin = String(body.pin || "").trim();
-      const user = state.users.find((u) => u.id === userId && u.active);
-      if (!user) return jsonResponse({ error: "\u0627\u0644\u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" }, 401);
+      const appType = body.appType === "desktop" ? "desktop" : "web";
+      const rememberMe = body.rememberMe !== false;
+      const user = state.users.find(
+        (u) => u.id.toLowerCase() === identifier || u.email.toLowerCase() === identifier
+      );
+      if (!user || !isUserAccountActive(user)) {
+        this.recordDeniedAccess(state, workspaceId, user, "\u0641\u0634\u0644 \u062F\u062E\u0648\u0644 PIN", "AuthPin", identifier || "unknown", "\u0645\u062D\u0627\u0648\u0644\u0629 \u062F\u062E\u0648\u0644 \u0628\u0631\u0645\u0632 PIN \u0644\u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u062A\u0627\u062D");
+        return jsonResponse({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0623\u0648 \u0631\u0645\u0632 PIN \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" }, 401);
+      }
+      const lockStatus = this.checkAccountLock(user.id);
+      if (lockStatus.locked) {
+        return jsonResponse(
+          { error: `\u062A\u0645 \u0642\u0641\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 \u0645\u0624\u0642\u062A\u0627\u064B \u0644\u0643\u062B\u0631\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062E\u0627\u0637\u0626\u0629. \u062D\u0627\u0648\u0644 \u0628\u0639\u062F ${lockStatus.retryAfterSec} \u062B\u0627\u0646\u064A\u0629.` },
+          429
+        );
+      }
       const cred = this.ctx.storage.sql.exec("SELECT pin_hash FROM user_credentials WHERE user_id = ?", user.id).toArray()[0];
-      if (!cred || !await verifySecretWeb(pin, cred.pin_hash)) {
+      if (!cred?.pin_hash || !await verifySecretWeb(pin, cred.pin_hash)) {
+        this.recordFailedAttempt(user.id);
+        this.recordDeniedAccess(state, workspaceId, user, "\u0641\u0634\u0644 \u062A\u062D\u0642\u0642 PIN", "AuthPin", user.id, "\u0645\u062D\u0627\u0648\u0644\u0629 \u062F\u062E\u0648\u0644 \u0628\u0631\u0645\u0632 PIN \u063A\u064A\u0631 \u0635\u062D\u064A\u062D");
         return jsonResponse({ error: "\u0631\u0645\u0632 PIN \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" }, 401);
       }
-      const { token, cookieHeader } = await this.issueSession(user, String(body.deviceName || "Web Terminal"));
+      this.clearFailedAttempts(user.id);
+      const session = await this.issueSession(user, workspaceId, String(body.deviceName || "Web Terminal"), {
+        rememberMe,
+        appType,
+        secure: secureReq
+      });
+      const userState = this.getStateForUser(state, user.id, workspaceId);
       return jsonResponse(
-        { authenticated: true, user, token, state: this.getStateForUser(state, user.id) },
+        {
+          authenticated: true,
+          workspaceId,
+          user: sanitizeUserForClient(user),
+          token: session.token,
+          ...appType === "desktop" && session.refreshToken ? { refreshToken: session.refreshToken } : {},
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
+          rememberMe: session.rememberMe,
+          landingNav: getRecommendedLandingNav(userState, user),
+          allowedNavs: getAllowedNavsForUser(userState, user),
+          state: userState
+        },
         200,
-        { "Set-Cookie": cookieHeader }
+        session.headers
+      );
+    }
+    if (pathname === "/api/auth/refresh" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const cookies = parseCookies(request.headers.get("cookie"));
+      const cookieRefresh = (cookies[REFRESH_COOKIE_NAME] || "").trim();
+      const bodyRefresh = body?.refreshToken ? String(body.refreshToken).trim() : "";
+      const rawRefresh = cookieRefresh || bodyRefresh;
+      if (!rawRefresh) {
+        return jsonResponse({ error: "\u0631\u0645\u0632 \u062A\u062C\u062F\u064A\u062F \u0627\u0644\u062C\u0644\u0633\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F", code: "AUTH_REQUIRED" }, 401);
+      }
+      const refHash = await sha256HexWeb(rawRefresh);
+      const dbSession = this.ctx.storage.sql.exec(
+        "SELECT token_id, user_id, workspace_id, device_name, app_type, remember_me, refresh_expires_at, revoked FROM sessions WHERE refresh_token_hash = ?",
+        refHash
+      ).toArray()[0];
+      if (!dbSession || dbSession.revoked !== 0 || dbSession.workspace_id !== workspaceId || dbSession.refresh_expires_at && new Date(dbSession.refresh_expires_at).getTime() <= Date.now()) {
+        return jsonResponse({ error: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u062C\u0644\u0633\u0629 \u2014 \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B", code: "AUTH_REQUIRED" }, 401);
+      }
+      if (dbSession.app_type !== "desktop" && !cookieRefresh) {
+        this.recordDeniedAccess(state, workspaceId, void 0, "\u0631\u0641\u0636 \u062A\u062C\u062F\u064A\u062F \u062C\u0644\u0633\u0629 \u0648\u064A\u0628 \u0639\u0628\u0631 body", "SessionSecurity", dbSession.token_id, "\u0645\u062D\u0627\u0648\u0644\u0629 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 refreshToken \u0641\u064A body \u0644\u062C\u0644\u0633\u0629 \u0648\u064A\u0628");
+        return jsonResponse({ error: "\u062A\u062C\u062F\u064A\u062F \u062C\u0644\u0633\u0629 \u0627\u0644\u0648\u064A\u0628 \u064A\u062A\u0637\u0644\u0628 \u0645\u0644\u0641 \u062A\u0639\u0631\u064A\u0641 \u0627\u0644\u062C\u0644\u0633\u0629 \u0627\u0644\u0622\u0645\u0646 \u0641\u0642\u0637", code: "AUTH_REQUIRED" }, 401);
+      }
+      const user = state.users.find((u) => u.id === dbSession.user_id && isUserAccountActive(u));
+      if (!user) {
+        this.revokeUserSessions(dbSession.user_id, workspaceId, "\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062D\u0633\u0627\u0628");
+        return jsonResponse({ error: "\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062D\u0633\u0627\u0628 \u0623\u0648 \u0627\u0646\u062A\u0647\u062A \u0639\u0636\u0648\u064A\u062A\u0647", code: "AUTH_REQUIRED" }, 401);
+      }
+      const rememberMe = dbSession.remember_me !== 0;
+      const isDesktop = dbSession.app_type === "desktop";
+      const now = Date.now();
+      const accessTtlMs = rememberMe ? ACCESS_TOKEN_TTL_MS : SESSION_SHORT_TTL_MS;
+      const exp = now + accessTtlMs;
+      const newExpiresAt = new Date(exp).toISOString();
+      const newRefreshExpiresAt = new Date(now + SESSION_TTL_MS).toISOString();
+      const newRefreshToken = randomHexWeb(32);
+      const newRefHash = await sha256HexWeb(newRefreshToken);
+      const newAccessToken = await signTokenWeb(
+        { sid: dbSession.token_id, uid: user.id, wid: workspaceId, role: user.role, deviceName: dbSession.device_name, iat: now, exp },
+        this.sessionSecretCache
+      );
+      this.ctx.storage.sql.exec(
+        "UPDATE sessions SET refresh_token_hash = ?, expires_at = ?, refresh_expires_at = ? WHERE token_id = ? AND refresh_token_hash = ? AND revoked = 0",
+        newRefHash,
+        newExpiresAt,
+        newRefreshExpiresAt,
+        dbSession.token_id,
+        refHash
+      );
+      const headers = this.buildSessionHeaders(newAccessToken, newRefreshToken, rememberMe, accessTtlMs, secureReq);
+      const userState = this.getStateForUser(state, user.id, workspaceId);
+      return jsonResponse(
+        {
+          ok: true,
+          authenticated: true,
+          workspaceId,
+          token: newAccessToken,
+          ...isDesktop ? { refreshToken: newRefreshToken } : {},
+          expiresAt: newExpiresAt,
+          refreshExpiresAt: newRefreshExpiresAt,
+          rememberMe,
+          user: sanitizeUserForClient(user),
+          landingNav: getRecommendedLandingNav(userState, user),
+          allowedNavs: getAllowedNavsForUser(userState, user),
+          state: userState
+        },
+        200,
+        headers
       );
     }
     if (pathname === "/api/auth/logout" && request.method === "POST") {
@@ -3931,9 +6175,10 @@ var AqarWorkspaceDO = class extends DurableObject {
           this.ctx.storage.sql.exec("UPDATE sessions SET revoked = 1 WHERE token_id = ?", claims.sid);
         }
       }
-      return jsonResponse({ ok: true }, 200, {
-        "Set-Cookie": `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
-      });
+      const headers = new Headers();
+      headers.append("Set-Cookie", `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      headers.append("Set-Cookie", `${REFRESH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      return jsonResponse({ ok: true }, 200, headers);
     }
     if (pathname === "/api/public/prospect-context" && request.method === "GET") {
       return jsonResponse({
@@ -3964,115 +6209,168 @@ var AqarWorkspaceDO = class extends DurableObject {
         budgetMonthly: Math.round(Number(body.offeredRent || 0) / 12),
         viewingDate: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
         status: "\u062C\u062F\u064A\u062F",
-        assignedTo: "usr-agent1",
+        assignedTo: state.users.find((u) => u.role === "leasing")?.id || state.users[0]?.id || "",
         notes: String(body.notes || ""),
         createdAt: (/* @__PURE__ */ new Date()).toISOString()
       };
       state.leads.unshift(lead);
-      this.persistState(state);
+      this.persistState(state, workspaceId);
       return jsonResponse({ lead, ok: true }, 201);
     }
-    const actor = !PUBLIC_PATHS.has(pathname) && !pathname.startsWith("/api/public/lead-decision/") ? await this.resolveActor(request, state) : null;
+    const actor = !PUBLIC_PATHS.has(pathname) && !pathname.startsWith("/api/public/lead-decision/") ? await this.resolveActor(request, state, workspaceId) : null;
     if (!PUBLIC_PATHS.has(pathname) && !pathname.startsWith("/api/public/lead-decision/") && !actor) {
+      this.recordDeniedAccess(
+        state,
+        workspaceId,
+        void 0,
+        "\u0631\u0641\u0636 \u0648\u0635\u0648\u0644 \u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0628\u0647 (401)",
+        "SecurityAuth",
+        pathname,
+        `\u0645\u062D\u0627\u0648\u0644\u0629 \u0648\u0635\u0648\u0644 \u0645\u0631\u0641\u0648\u0636\u0629 (${request.method} ${pathname}) \u0628\u062F\u0648\u0646 \u062C\u0644\u0633\u0629 \u0635\u0627\u0644\u062D\u0629`
+      );
       return jsonResponse(
         { error: "\u0627\u0646\u062A\u0647\u062A \u0627\u0644\u062C\u0644\u0633\u0629 \u0623\u0648 \u0644\u0645 \u064A\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u2014 \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u0635\u0627\u062F\u0642\u0629 \u0644\u0644\u0645\u062A\u0627\u0628\u0639\u0629", code: "AUTH_REQUIRED" },
         401
       );
     }
     const verifiedActor = actor;
+    if (pathname === "/api/auth/logout-all" && request.method === "POST") {
+      const revokedCount = this.revokeUserSessions(
+        verifiedActor.userId,
+        workspaceId,
+        "\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062E\u0631\u0648\u062C \u0645\u0646 \u062C\u0645\u064A\u0639 \u0627\u0644\u0623\u062C\u0647\u0632\u0629 \u0628\u0646\u0627\u0621\u064B \u0639\u0644\u0649 \u0637\u0644\u0628\u0643"
+      );
+      const headers = new Headers();
+      headers.append("Set-Cookie", `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      headers.append("Set-Cookie", `${REFRESH_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+      return jsonResponse({ ok: true, revokedCount }, 200, headers);
+    }
+    if (pathname === "/api/auth/me" && request.method === "GET") {
+      const user = state.users.find((u) => u.id === verifiedActor.userId);
+      const userState = this.getStateForUser(state, verifiedActor.userId, workspaceId);
+      return jsonResponse({
+        authenticated: true,
+        user: user ? sanitizeUserForClient(user) : void 0,
+        sessionId: verifiedActor.sessionId,
+        allowedNavs: getAllowedNavsForUser(userState, user),
+        landingNav: getRecommendedLandingNav(userState, user)
+      });
+    }
     if (pathname === "/api/state" && request.method === "GET") {
       return jsonResponse({
-        state: this.getStateForUser(state, verifiedActor.userId),
-        presence: this.getPresenceList(state)
+        state: this.getStateForUser(state, verifiedActor.userId, workspaceId),
+        presence: this.getPresenceList(state),
+        workspaceId
       });
     }
     if (pathname === "/api/auth/credentials" && request.method === "POST") {
-      const body = await request.json().catch(() => ({}));
-      const targetUserId = String(body.targetUserId || verifiedActor.userId);
-      if (targetUserId !== verifiedActor.userId) {
-        this.assertPermission(state, verifiedActor.userId, "manage_users");
+      try {
+        const body = await request.json().catch(() => ({}));
+        const targetUserId = String(body.targetUserId || verifiedActor.userId);
+        const actorUser = this.getActingUser(state, verifiedActor.userId);
+        const isSelf = targetUserId === actorUser.id;
+        if (!isSelf && actorUser.role !== "sys_owner") {
+          this.recordDeniedAccess(state, workspaceId, actorUser, "\u0631\u0641\u0636 \u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u062F\u062E\u0648\u0644 \u0645\u0648\u0638\u0641", "StaffCredentials", targetUserId, "\u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u062F\u062E\u0648\u0644 \u0645\u0648\u0638\u0641 \u0622\u062E\u0631 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645", { deviceName: verifiedActor.deviceName });
+          throw new WorkerPermissionDeniedError("\u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u062F\u062E\u0648\u0644 \u0645\u0648\u0638\u0641 \u0622\u062E\u0631 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+        }
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        const row = this.ctx.storage.sql.exec(
+          "SELECT password_hash, pin_hash FROM user_credentials WHERE user_id = ?",
+          targetUserId
+        ).toArray()[0];
+        if (isSelf && body.newPassword) {
+          if (!body.currentPassword || !row?.password_hash || !await verifySecretWeb(String(body.currentPassword), row.password_hash)) {
+            return jsonResponse({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" }, 400);
+          }
+        }
+        let pwHash = row?.password_hash || await hashSecretWeb(randomHexWeb(18));
+        let pinHash = row?.pin_hash ?? null;
+        if (body.newPassword) {
+          if (String(body.newPassword).length < 8) {
+            return jsonResponse({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u064A\u062C\u0628 \u0623\u0646 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641" }, 400);
+          }
+          pwHash = await hashSecretWeb(String(body.newPassword));
+        }
+        if (body.newPin) {
+          if (!/^\d{4,6}$/.test(String(body.newPin))) {
+            return jsonResponse({ error: "\u0631\u0645\u0632 PIN \u0627\u0644\u062C\u062F\u064A\u062F \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0643\u0648\u0646 \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645" }, 400);
+          }
+          pinHash = await hashSecretWeb(String(body.newPin));
+        }
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, failed_attempts, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)",
+          targetUserId,
+          pwHash,
+          pinHash,
+          now
+        );
+        if (body.newPassword || body.newPin) {
+          this.revokeUserSessions(
+            targetUserId,
+            workspaceId,
+            isSelf ? "\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u2014 \u062A\u0645 \u0625\u0646\u0647\u0627\u0621 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0623\u062E\u0631\u0649" : "\u062A\u0645\u062A \u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0648\u0627\u0633\u0637\u0629 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645",
+            isSelf ? verifiedActor.sessionId : void 0
+          );
+        }
+        this.appendAudit(state, verifiedActor.userId, "\u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644", "\u0623\u0645\u0627\u0646 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645\u064A\u0646", targetUserId, isSelf ? "\u062A\u062D\u062F\u064A\u062B \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0623\u0648 PIN \u0627\u0644\u0634\u062E\u0635\u064A" : `\u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646 \u0628\u064A\u0627\u0646\u0627\u062A ${targetUserId}`, verifiedActor.deviceName);
+        this.persistState(state, workspaceId);
+        return jsonResponse({ ok: true, state: this.getStateForUser(state, verifiedActor.userId, workspaceId) });
+      } catch (err) {
+        return errorResponse(err, 400);
       }
-      const now = (/* @__PURE__ */ new Date()).toISOString();
-      const row = this.ctx.storage.sql.exec(
-        "SELECT password_hash, pin_hash FROM user_credentials WHERE user_id = ?",
-        targetUserId
-      ).toArray()[0];
-      let pwHash = row?.password_hash || await hashSecretWeb("Aqar@2026");
-      let pinHash = row?.pin_hash || await hashSecretWeb("1234");
-      if (body.newPassword && String(body.newPassword).length >= 6) {
-        pwHash = await hashSecretWeb(String(body.newPassword));
-      }
-      if (body.newPin && /^\d{4,6}$/.test(String(body.newPin))) {
-        pinHash = await hashSecretWeb(String(body.newPin));
-      }
-      this.ctx.storage.sql.exec(
-        "INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, updated_at) VALUES (?, ?, ?, ?)",
-        targetUserId,
-        pwHash,
-        pinHash,
-        now
-      );
-      return jsonResponse({ ok: true, state: this.getStateForUser(state, verifiedActor.userId) });
     }
     if (pathname === "/api/backups" && request.method === "POST") {
-      this.assertPermission(state, verifiedActor.userId, "backup_restore");
-      const body = await request.json().catch(() => ({}));
-      const snapshotData = JSON.parse(JSON.stringify(state));
-      const encryptPassword = body.encryptPassword ? String(body.encryptPassword) : void 0;
-      const encrypted = Boolean(encryptPassword && encryptPassword.trim().length > 0);
-      const id = uid("bkp");
-      const payloadToStore = encrypted ? await encryptBackupWeb(snapshotData, encryptPassword) : snapshotData;
-      const rawPayload = JSON.stringify(payloadToStore);
-      const bkpMeta = {
-        id,
-        label: String(body.label || `\u0646\u0633\u062E\u0629 \u0633\u062D\u0627\u0628\u064A\u0629 \xB7 ${(/* @__PURE__ */ new Date()).toLocaleDateString("ar-SA")}`),
-        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-        createdBy: verifiedActor.userId,
-        sizeKb: Math.max(1, Math.round(rawPayload.length / 1024)),
-        recordCount: state.properties.length + state.units.length + state.tenants.length + state.contracts.length + state.payments.length,
-        encrypted
-      };
-      this.ctx.storage.sql.exec(
-        "INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)",
-        id,
-        rawPayload,
-        bkpMeta.createdAt
-      );
-      state.backups.unshift(bkpMeta);
-      this.persistState(state);
-      return jsonResponse({ backup: bkpMeta, state: this.getStateForUser(state, verifiedActor.userId) }, 201);
+      try {
+        this.assertPermission(state, workspaceId, verifiedActor.userId, "backup_restore", {
+          entityType: "Backup",
+          deviceName: verifiedActor.deviceName
+        });
+        const body = await request.json().catch(() => ({}));
+        const snapshotData = JSON.parse(JSON.stringify(state));
+        const encryptPassword = body.encryptPassword ? String(body.encryptPassword) : void 0;
+        const encrypted = Boolean(encryptPassword && encryptPassword.trim().length > 0);
+        const id = uid("bkp");
+        const payloadToStore = encrypted ? await encryptBackupWeb(snapshotData, encryptPassword) : snapshotData;
+        const rawPayload = JSON.stringify(payloadToStore);
+        const bkpMeta = {
+          id,
+          label: String(body.label || `\u0646\u0633\u062E\u0629 \u0633\u062D\u0627\u0628\u064A\u0629 \xB7 ${(/* @__PURE__ */ new Date()).toLocaleDateString("ar-SA")}`),
+          createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+          createdBy: verifiedActor.userId,
+          sizeKb: Math.max(1, Math.round(rawPayload.length / 1024)),
+          recordCount: state.properties.length + state.units.length + state.tenants.length + state.contracts.length + state.payments.length,
+          encrypted
+        };
+        this.ctx.storage.sql.exec(
+          "INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)",
+          id,
+          rawPayload,
+          bkpMeta.createdAt
+        );
+        state.backups.unshift(bkpMeta);
+        this.persistState(state, workspaceId);
+        return jsonResponse({ backup: bkpMeta, state: this.getStateForUser(state, verifiedActor.userId, workspaceId) }, 201);
+      } catch (err) {
+        return errorResponse(err, 400);
+      }
     }
     const bkpPreviewMatch = /^\/api\/backups\/([^/]+)\/preview$/.exec(pathname);
     if (bkpPreviewMatch && (request.method === "POST" || request.method === "GET")) {
-      this.assertPermission(state, verifiedActor.userId, "backup_restore");
-      const bkpId = bkpPreviewMatch[1];
-      const meta = state.backups.find((b) => b.id === bkpId);
-      const row = this.ctx.storage.sql.exec("SELECT payload_json FROM backups_store WHERE id = ?", bkpId).toArray()[0];
-      if (!row) {
-        return jsonResponse({
-          id: bkpId,
-          label: meta?.label || "",
-          exists: false,
-          encrypted: Boolean(meta?.encrypted),
-          propertiesCount: 0,
-          unitsCount: 0,
-          tenantsCount: 0,
-          contractsCount: 0,
-          paymentsCount: 0,
-          templatesCount: 0
+      try {
+        this.assertPermission(state, workspaceId, verifiedActor.userId, "backup_restore", {
+          entityType: "Backup",
+          entityId: bkpPreviewMatch[1],
+          deviceName: verifiedActor.deviceName
         });
-      }
-      const parsed = JSON.parse(row.payload_json);
-      let snap;
-      if ("aqarEncrypted" in parsed && parsed.aqarEncrypted) {
-        const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
-        const password = body.password ? String(body.password) : url.searchParams.get("password") || "";
-        if (!password) {
+        const bkpId = bkpPreviewMatch[1];
+        const meta = state.backups.find((b) => b.id === bkpId);
+        const row = this.ctx.storage.sql.exec("SELECT payload_json FROM backups_store WHERE id = ?", bkpId).toArray()[0];
+        if (!row) {
           return jsonResponse({
             id: bkpId,
-            exists: true,
-            encrypted: true,
-            requiresPassword: true,
+            label: meta?.label || "",
+            exists: false,
+            encrypted: Boolean(meta?.encrypted),
             propertiesCount: 0,
             unitsCount: 0,
             tenantsCount: 0,
@@ -4081,109 +6379,148 @@ var AqarWorkspaceDO = class extends DurableObject {
             templatesCount: 0
           });
         }
-        try {
-          snap = await decryptBackupWeb(parsed, password);
-        } catch {
-          return jsonResponse({
-            id: bkpId,
-            exists: true,
-            encrypted: true,
-            requiresPassword: true,
-            decryptionError: "\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0641\u0643 \u0627\u0644\u062A\u0634\u0641\u064A\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629",
-            propertiesCount: 0,
-            unitsCount: 0,
-            tenantsCount: 0,
-            contractsCount: 0,
-            paymentsCount: 0,
-            templatesCount: 0
-          });
+        const parsed = JSON.parse(row.payload_json);
+        let snap;
+        if ("aqarEncrypted" in parsed && parsed.aqarEncrypted) {
+          const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+          const password = body.password ? String(body.password) : url.searchParams.get("password") || "";
+          if (!password) {
+            return jsonResponse({
+              id: bkpId,
+              exists: true,
+              encrypted: true,
+              requiresPassword: true,
+              propertiesCount: 0,
+              unitsCount: 0,
+              tenantsCount: 0,
+              contractsCount: 0,
+              paymentsCount: 0,
+              templatesCount: 0
+            });
+          }
+          try {
+            snap = await decryptBackupWeb(parsed, password);
+          } catch {
+            return jsonResponse({
+              id: bkpId,
+              exists: true,
+              encrypted: true,
+              requiresPassword: true,
+              decryptionError: "\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0641\u0643 \u0627\u0644\u062A\u0634\u0641\u064A\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629",
+              propertiesCount: 0,
+              unitsCount: 0,
+              tenantsCount: 0,
+              contractsCount: 0,
+              paymentsCount: 0,
+              templatesCount: 0
+            });
+          }
+        } else {
+          snap = parsed;
         }
-      } else {
-        snap = parsed;
+        const diffCollection = (cur = [], inc = []) => {
+          const curMap = new Map(cur.map((x) => [x.id, JSON.stringify(x)]));
+          let added = 0;
+          let updated = 0;
+          let unchanged = 0;
+          for (const item of inc) {
+            const ex = curMap.get(item.id);
+            if (!ex) added += 1;
+            else if (ex === JSON.stringify(item)) unchanged += 1;
+            else updated += 1;
+          }
+          return { added, updated, unchanged };
+        };
+        const diff = {
+          properties: diffCollection(state.properties, snap.properties),
+          units: diffCollection(state.units, snap.units),
+          tenants: diffCollection(state.tenants, snap.tenants),
+          contracts: diffCollection(state.contracts, snap.contracts),
+          payments: diffCollection(state.payments, snap.payments),
+          expenses: diffCollection(state.expenses, snap.expenses),
+          tickets: diffCollection(state.tickets, snap.tickets)
+        };
+        const totalChanged = Object.values(diff).reduce((s, d) => s + d.added + d.updated, 0);
+        const preview = {
+          id: bkpId,
+          exists: true,
+          encrypted: "aqarEncrypted" in parsed,
+          propertiesCount: snap.properties?.length || 0,
+          unitsCount: snap.units?.length || 0,
+          tenantsCount: snap.tenants?.length || 0,
+          contractsCount: snap.contracts?.length || 0,
+          paymentsCount: snap.payments?.length || 0,
+          templatesCount: snap.communicationTemplates?.length || 0,
+          lastUpdatedAt: snap.lastUpdatedAt,
+          diff: { ...diff, totalChanged }
+        };
+        return jsonResponse(preview);
+      } catch (err) {
+        return errorResponse(err, 400);
       }
-      const diffCollection = (cur = [], inc = []) => {
-        const curMap = new Map(cur.map((x) => [x.id, JSON.stringify(x)]));
-        let added = 0;
-        let updated = 0;
-        let unchanged = 0;
-        for (const item of inc) {
-          const ex = curMap.get(item.id);
-          if (!ex) added += 1;
-          else if (ex === JSON.stringify(item)) unchanged += 1;
-          else updated += 1;
-        }
-        return { added, updated, unchanged };
-      };
-      const diff = {
-        properties: diffCollection(state.properties, snap.properties),
-        units: diffCollection(state.units, snap.units),
-        tenants: diffCollection(state.tenants, snap.tenants),
-        contracts: diffCollection(state.contracts, snap.contracts),
-        payments: diffCollection(state.payments, snap.payments),
-        expenses: diffCollection(state.expenses, snap.expenses),
-        tickets: diffCollection(state.tickets, snap.tickets)
-      };
-      const totalChanged = Object.values(diff).reduce((s, d) => s + d.added + d.updated, 0);
-      const preview = {
-        id: bkpId,
-        exists: true,
-        encrypted: "aqarEncrypted" in parsed,
-        propertiesCount: snap.properties?.length || 0,
-        unitsCount: snap.units?.length || 0,
-        tenantsCount: snap.tenants?.length || 0,
-        contractsCount: snap.contracts?.length || 0,
-        paymentsCount: snap.payments?.length || 0,
-        templatesCount: snap.communicationTemplates?.length || 0,
-        lastUpdatedAt: snap.lastUpdatedAt,
-        diff: { ...diff, totalChanged }
-      };
-      return jsonResponse(preview);
     }
     const bkpRestoreMatch = /^\/api\/backups\/([^/]+)\/restore$/.exec(pathname);
     if (bkpRestoreMatch && request.method === "POST") {
-      this.assertPermission(state, verifiedActor.userId, "backup_restore");
-      const bkpId = bkpRestoreMatch[1];
-      const body = await request.json().catch(() => ({}));
-      const row = this.ctx.storage.sql.exec("SELECT payload_json FROM backups_store WHERE id = ?", bkpId).toArray()[0];
-      if (!row) return jsonResponse({ error: "\u0627\u0644\u0646\u0633\u062E\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" }, 404);
-      const parsed = JSON.parse(row.payload_json);
-      let snap;
-      if ("aqarEncrypted" in parsed && parsed.aqarEncrypted) {
-        if (!body.password) return jsonResponse({ error: "\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0641\u0643 \u0627\u0644\u062A\u0634\u0641\u064A\u0631 \u0645\u0637\u0644\u0648\u0628\u0629" }, 400);
-        snap = await decryptBackupWeb(parsed, String(body.password));
-      } else {
-        snap = parsed;
+      try {
+        this.assertPermission(state, workspaceId, verifiedActor.userId, "backup_restore", {
+          entityType: "Backup",
+          entityId: bkpRestoreMatch[1],
+          deviceName: verifiedActor.deviceName
+        });
+        const bkpId = bkpRestoreMatch[1];
+        const body = await request.json().catch(() => ({}));
+        const row = this.ctx.storage.sql.exec("SELECT payload_json FROM backups_store WHERE id = ?", bkpId).toArray()[0];
+        if (!row) return jsonResponse({ error: "\u0627\u0644\u0646\u0633\u062E\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" }, 404);
+        const parsed = JSON.parse(row.payload_json);
+        let snap;
+        if ("aqarEncrypted" in parsed && parsed.aqarEncrypted) {
+          if (!body.password) return jsonResponse({ error: "\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0641\u0643 \u0627\u0644\u062A\u0634\u0641\u064A\u0631 \u0645\u0637\u0644\u0648\u0628\u0629" }, 400);
+          try {
+            snap = await decryptBackupWeb(parsed, String(body.password));
+          } catch {
+            return jsonResponse({ error: "\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0641\u0643 \u0627\u0644\u062A\u0634\u0641\u064A\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" }, 400);
+          }
+        } else {
+          snap = parsed;
+        }
+        const safetyId = uid("bkp-safety");
+        this.ctx.storage.sql.exec(
+          "INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)",
+          safetyId,
+          JSON.stringify(state),
+          (/* @__PURE__ */ new Date()).toISOString()
+        );
+        const existingAudits = [...state.auditLogs || []];
+        if (body.mode === "merge") {
+          const mergeById = (cur = [], inc = []) => {
+            const seen = new Set(cur.map((x) => x.id));
+            return [...cur, ...inc.filter((x) => !seen.has(x.id))];
+          };
+          state.properties = mergeById(state.properties, snap.properties);
+          state.units = mergeById(state.units, snap.units);
+          state.tenants = mergeById(state.tenants, snap.tenants);
+          state.contracts = mergeById(state.contracts, snap.contracts);
+          state.installments = mergeById(state.installments, snap.installments);
+          state.payments = mergeById(state.payments, snap.payments);
+          state.expenses = mergeById(state.expenses, snap.expenses);
+          state.tickets = mergeById(state.tickets, snap.tickets);
+          state.tasks = mergeById(state.tasks, snap.tasks);
+          state.documents = mergeById(state.documents, snap.documents);
+          state.auditLogs = mergeById(existingAudits, snap.auditLogs || []);
+        } else {
+          const preservedBackups = state.backups;
+          Object.assign(state, snap);
+          state.backups = preservedBackups;
+          const seenAudits = new Set(existingAudits.map((a) => a.id));
+          state.auditLogs = [...existingAudits, ...(snap.auditLogs || []).filter((a) => !seenAudits.has(a.id))];
+        }
+        this.appendAudit(state, verifiedActor.userId, "\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629", "\u0646\u0638\u0627\u0645", bkpId, `\u0627\u0633\u062A\u0639\u0627\u062F\u0629 (${body.mode || "replace"}) \u0645\u0639 \u0627\u0644\u062D\u0641\u0627\u0638 \u0639\u0644\u0649 \u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642`, verifiedActor.deviceName);
+        this.persistState(state, workspaceId);
+        this.broadcastStateChange(state, verifiedActor.userId, "\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629", workspaceId);
+        return jsonResponse({ ok: true, mode: body.mode || "replace", state: this.getStateForUser(state, verifiedActor.userId, workspaceId) });
+      } catch (err) {
+        return errorResponse(err, 400);
       }
-      const safetyId = uid("bkp-safety");
-      this.ctx.storage.sql.exec(
-        "INSERT INTO backups_store (id, payload_json, created_at) VALUES (?, ?, ?)",
-        safetyId,
-        JSON.stringify(state),
-        (/* @__PURE__ */ new Date()).toISOString()
-      );
-      if (body.mode === "merge") {
-        const mergeById = (cur = [], inc = []) => {
-          const seen = new Set(cur.map((x) => x.id));
-          return [...cur, ...inc.filter((x) => !seen.has(x.id))];
-        };
-        state.properties = mergeById(state.properties, snap.properties);
-        state.units = mergeById(state.units, snap.units);
-        state.tenants = mergeById(state.tenants, snap.tenants);
-        state.contracts = mergeById(state.contracts, snap.contracts);
-        state.installments = mergeById(state.installments, snap.installments);
-        state.payments = mergeById(state.payments, snap.payments);
-        state.expenses = mergeById(state.expenses, snap.expenses);
-        state.tickets = mergeById(state.tickets, snap.tickets);
-        state.tasks = mergeById(state.tasks, snap.tasks);
-        state.documents = mergeById(state.documents, snap.documents);
-      } else {
-        const preservedBackups = state.backups;
-        Object.assign(state, snap);
-        state.backups = preservedBackups;
-      }
-      this.persistState(state);
-      this.broadcastStateChange(state, verifiedActor.userId, "\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629");
-      return jsonResponse({ ok: true, mode: body.mode || "replace", state: this.getStateForUser(state, verifiedActor.userId) });
     }
     if (pathname === "/api/sync/batch" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
@@ -4227,11 +6564,13 @@ var AqarWorkspaceDO = class extends DurableObject {
           const res = await this.handleMutation(state, verifiedActor, op.method || "POST", op.endpoint, op.body || {});
           uploaded += 1;
           this.ctx.storage.sql.exec(
-            "INSERT INTO operations_log (operation_id, user_id, method, endpoint, status, response_json, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO operations_log (operation_id, user_id, method, endpoint, entity_type, entity_id, status, response_json, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             operationId,
             verifiedActor.userId,
             op.method || "POST",
             op.endpoint,
+            op.entityType || null,
+            op.entityId || null,
             "applied",
             JSON.stringify({ ok: true, id: res?.id }),
             (/* @__PURE__ */ new Date()).toISOString()
@@ -4240,9 +6579,9 @@ var AqarWorkspaceDO = class extends DurableObject {
           errors.push(err.message);
         }
       }
-      if (conflictsDetected > 0) this.persistState(state);
+      if (conflictsDetected > 0) this.persistState(state, workspaceId);
       if (uploaded > 0) {
-        this.broadcastStateChange(state, verifiedActor.userId, `\u0645\u0632\u0627\u0645\u0646\u0629 ${uploaded} \u0639\u0645\u0644\u064A\u0629 \u0645\u0646 \u0627\u0644\u0639\u0645\u0644 \u062F\u0648\u0646 \u0625\u0646\u062A\u0631\u0646\u062A`);
+        this.broadcastStateChange(state, verifiedActor.userId, `\u0645\u0632\u0627\u0645\u0646\u0629 ${uploaded} \u0639\u0645\u0644\u064A\u0629 \u0645\u0646 \u0627\u0644\u0639\u0645\u0644 \u062F\u0648\u0646 \u0625\u0646\u062A\u0631\u0646\u062A`, workspaceId);
       }
       return jsonResponse({
         success: errors.length === 0,
@@ -4251,7 +6590,7 @@ var AqarWorkspaceDO = class extends DurableObject {
         conflictsDetected,
         newConflicts,
         errors,
-        state: this.getStateForUser(state, verifiedActor.userId),
+        state: this.getStateForUser(state, verifiedActor.userId, workspaceId),
         syncedAt: (/* @__PURE__ */ new Date()).toISOString()
       });
     }
@@ -4264,17 +6603,17 @@ var AqarWorkspaceDO = class extends DurableObject {
         lastUpdatedAt: state.lastUpdatedAt,
         pendingConflictsCount: (state.syncConflicts || []).filter((c) => c.status === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0645\u0631\u0627\u062C\u0639\u0629 \u0627\u0644\u0645\u062F\u064A\u0631").length,
         syncConflicts: state.syncConflicts || [],
-        state: hasChanges ? this.getStateForUser(state, verifiedActor.userId) : void 0
+        state: hasChanges ? this.getStateForUser(state, verifiedActor.userId, workspaceId) : void 0
       });
     }
     if (request.method === "POST" || request.method === "PATCH" || request.method === "DELETE") {
       try {
         const body = await request.json().catch(() => ({}));
         const result = await this.handleMutation(state, verifiedActor, request.method, pathname, body);
-        this.broadcastStateChange(state, verifiedActor.userId, `\u062A\u062D\u062F\u064A\u062B ${pathname}`);
+        this.broadcastStateChange(state, verifiedActor.userId, `\u062A\u062D\u062F\u064A\u062B ${pathname}`, workspaceId);
         return jsonResponse(result, request.method === "POST" ? 201 : 200);
       } catch (err) {
-        return jsonResponse({ error: err.message }, 400);
+        return errorResponse(err, 400);
       }
     }
     return jsonResponse({ error: "Not Found" }, 404);
@@ -4284,9 +6623,13 @@ var AqarWorkspaceDO = class extends DurableObject {
       const text = typeof message === "string" ? message : new TextDecoder().decode(message);
       const msg = JSON.parse(text);
       if (msg.type === "session:identify") {
-        const state = await this.ensureBootstrapped();
-        const dummyReq = new Request("https://worker.local/ws");
-        const actor = await this.resolveActor(dummyReq, state, msg.token);
+        const prev = ws.deserializeAttachment();
+        const workspaceId = prev?.workspaceId || "default";
+        const state = await this.ensureBootstrapped(workspaceId);
+        const dummyReq = new Request("https://worker.local/ws", {
+          headers: { "x-resolved-workspace-id": workspaceId }
+        });
+        const actor = await this.resolveActor(dummyReq, state, workspaceId, msg.token);
         if (!actor) {
           ws.send(JSON.stringify({ type: "auth:required" }));
           return;
@@ -4294,6 +6637,7 @@ var AqarWorkspaceDO = class extends DurableObject {
         const meta = {
           sessionId: actor.sessionId,
           userId: actor.userId,
+          workspaceId,
           authenticated: true,
           deviceName: msg.deviceName || actor.deviceName,
           connectedAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -4302,7 +6646,7 @@ var AqarWorkspaceDO = class extends DurableObject {
         ws.send(
           JSON.stringify({
             type: "state:init",
-            state: this.getStateForUser(state, actor.userId),
+            state: this.getStateForUser(state, actor.userId, workspaceId),
             presence: this.getPresenceList(state)
           })
         );
@@ -4319,18 +6663,42 @@ var AqarWorkspaceDO = class extends DurableObject {
 };
 
 // worker/src/index.ts
+var VALID_WORKSPACE_RE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+function resolveWorkspaceId(request, url) {
+  const fromHeader = (request.headers.get("x-workspace-id") || "").trim().toLowerCase();
+  if (fromHeader && VALID_WORKSPACE_RE.test(fromHeader)) {
+    return fromHeader;
+  }
+  const fromQuery = (url.searchParams.get("workspace") || "").trim().toLowerCase();
+  if (fromQuery && VALID_WORKSPACE_RE.test(fromQuery)) {
+    return fromQuery;
+  }
+  const host = url.hostname.toLowerCase();
+  const parts = host.split(".");
+  if (parts.length >= 3 && !host.endsWith(".workers.dev") && parts[0] !== "www" && parts[0] !== "app") {
+    if (VALID_WORKSPACE_RE.test(parts[0])) {
+      return parts[0];
+    }
+  }
+  return "default";
+}
 var index_default = {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/") || url.pathname === "/ws") {
-      const id = env.WORKSPACE_DO.idFromName("aqarplus-main-workspace");
+      const workspaceId = resolveWorkspaceId(request, url);
+      const id = env.WORKSPACE_DO.idFromName(`ws:${workspaceId}`);
       const stub = env.WORKSPACE_DO.get(id);
-      return stub.fetch(request);
+      const headers = new Headers(request.headers);
+      headers.set("x-resolved-workspace-id", workspaceId);
+      const forwarded = new Request(request, { headers });
+      return stub.fetch(forwarded);
     }
     return env.ASSETS.fetch(request);
   }
 };
 export {
   AqarWorkspaceDO,
-  index_default as default
+  index_default as default,
+  resolveWorkspaceId
 };

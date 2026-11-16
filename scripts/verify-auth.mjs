@@ -9,6 +9,7 @@ const TEST_PORT = 3461;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 
 process.env.NODE_ENV = 'production';
+process.env.AQAR_ALLOW_SEED_DEFAULTS = 'true';
 process.env.AQARPLUS_NO_AUTO_START = '1';
 process.env.AQARPLUS_USER_DATA_DIR = TMP_DATA_DIR;
 process.env.AQARPLUS_DIST_DIR = path.resolve(process.cwd(), 'dist');
@@ -236,7 +237,55 @@ async function runAuthSuite() {
     assert.equal(unlockedPinCheck.status, 200, 'Successful password login must unlock temporary PIN lockout');
     console.log('✓ 4. PIN enable/disable toggle, progressive lockout, and password unlock verified');
 
-    // 5. Refresh Token Rotation & Replay Detection
+    // 5. Refresh Token Rotation & Replay Detection (Web HttpOnly cookie-only vs Desktop JSON)
+    const extractCookieVal = (res, name) => {
+      const getSetCookie = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [res.headers.get('set-cookie') || ''];
+      for (const line of getSetCookie) {
+        const m = String(line).match(new RegExp(`(?:^|,\\s*)${name}=([^;]+)`));
+        if (m) return decodeURIComponent(m[1]);
+      }
+      return '';
+    };
+
+    const webRefreshLogin = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: 'fahad.acc@aqarplus.sa',
+        password: 'FahadPassword!26',
+        rememberMe: true,
+        appType: 'web',
+      }),
+    });
+    assert.equal(webRefreshLogin.status, 200);
+    const webRefreshJson = await webRefreshLogin.json();
+    assert.equal(webRefreshJson.refreshToken, undefined, 'Web login must NOT expose refreshToken in JSON body');
+    const webRefreshCookie1 = extractCookieVal(webRefreshLogin, 'aqar_refresh');
+    assert.ok(webRefreshCookie1, 'Web rememberMe login must set HttpOnly aqar_refresh cookie');
+
+    // Body-only web refresh token attempt must fail
+    const bodyOnlyWebRefresh = await fetch(`${BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: webRefreshCookie1 }),
+    });
+    assert.equal(bodyOnlyWebRefresh.status, 401, 'Web refresh token must NOT be accepted via JSON body alone');
+
+    const webRefreshRotate = await fetch(`${BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `aqar_refresh=${encodeURIComponent(webRefreshCookie1)}`,
+      },
+      body: JSON.stringify({}),
+    });
+    assert.equal(webRefreshRotate.status, 200);
+    const webRefreshRotateJson = await webRefreshRotate.json();
+    assert.equal(webRefreshRotateJson.refreshToken, undefined);
+    const webRefreshCookie2 = extractCookieVal(webRefreshRotate, 'aqar_refresh');
+    assert.ok(webRefreshCookie2 && webRefreshCookie2 !== webRefreshCookie1);
+
+    // Desktop appType keeps JSON refreshToken rotation & replay detection
     const preRefreshLogin = await fetch(`${BASE_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -244,6 +293,7 @@ async function runAuthSuite() {
         identifier: 'fahad.acc@aqarplus.sa',
         password: 'FahadPassword!26',
         rememberMe: true,
+        appType: 'desktop',
       }),
     });
     assert.equal(preRefreshLogin.status, 200);
@@ -268,7 +318,7 @@ async function runAuthSuite() {
       body: JSON.stringify({ refreshToken: firstRefresh }),
     });
     assert.equal(replayRefresh.status, 401, 'Old rotated refresh token replay must fail');
-    console.log('✓ 5. Refresh token rotation & replay rejection verified');
+    console.log('✓ 5. Refresh token rotation (web HttpOnly cookie + desktop JSON) & replay rejection verified');
 
     // 6. Adaptive 2FA + Trusted Device lifecycle
     const enable2faRes = await fetch(`${BASE_URL}/api/profile/two-factor`, {

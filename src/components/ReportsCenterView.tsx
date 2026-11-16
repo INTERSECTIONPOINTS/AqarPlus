@@ -37,13 +37,28 @@ type PnlPeriod = 'monthly' | 'quarterly' | 'annual';
 const CHART_COLORS = ['#26478D', '#10B981', '#F59E0B', '#EF4444', '#6366F1', '#0EA5E9'];
 
 export function ReportsCenterView() {
-  const { state, lang, baseCurrency, convertToBase, pushToast } = useAqar();
+  const { state, currentUser, lang, baseCurrency, convertToBase, pushToast, hasPermission, hasModulePermission } = useAqar();
   const [catTab, setCatTab] = useState<ReportCategoryTab>('real_estate');
   const [pnlPeriod, setPnlPeriod] = useState<PnlPeriod>('monthly');
   const [arrearsView, setArrearsView] = useState<'property' | 'tenant' | 'duration'>('property');
   const [expenseView, setExpenseView] = useState<'category' | 'property' | 'vendor'>('category');
 
   const isAr = lang === 'ar';
+  const isOwner = currentUser?.role === 'owner';
+  const canExportReports = hasModulePermission('reports', 'export') || hasPermission('view_all');
+  const canViewFinancialReports =
+    isOwner ||
+    hasModulePermission('finance', 'view') ||
+    hasModulePermission('reports', 'view') ||
+    hasPermission('manage_accounting');
+  const canViewHrReports =
+    !isOwner &&
+    (hasModulePermission('team', 'view') || hasPermission('manage_users') || hasPermission('view_all'));
+  const canUseCustomBuilder =
+    !isOwner &&
+    (hasModulePermission('reports', 'create') ||
+      hasModulePermission('reports', 'manage') ||
+      hasPermission('view_all'));
 
   const realEstateData = useMemo(() => {
     if (!state) {
@@ -424,12 +439,34 @@ export function ReportsCenterView() {
         <div className="flex flex-wrap items-center gap-1.5">
           {(
             [
-              { id: 'real_estate', labelAr: 'أ. التقارير العقارية', icon: Building2 },
-              { id: 'financial', labelAr: 'ب. التقارير المالية والضرائب', icon: TrendingUp },
-              { id: 'hr', labelAr: 'ج. تقارير الموارد البشرية والعمولات', icon: Users },
-              { id: 'custom', labelAr: 'د. مُنشئ التقارير المخصصة والجدولة', icon: SlidersHorizontal },
-            ] as { id: ReportCategoryTab; labelAr: string; icon: React.ComponentType<{ className?: string }> }[]
-          ).map((t) => {
+              { id: 'real_estate', labelAr: 'أ. التقارير العقارية', icon: Building2, allowed: true },
+              {
+                id: 'financial',
+                labelAr: 'ب. التقارير المالية والضرائب',
+                icon: TrendingUp,
+                allowed: canViewFinancialReports,
+              },
+              {
+                id: 'hr',
+                labelAr: 'ج. تقارير الموارد البشرية والعمولات',
+                icon: Users,
+                allowed: canViewHrReports,
+              },
+              {
+                id: 'custom',
+                labelAr: 'د. مُنشئ التقارير المخصصة والجدولة',
+                icon: SlidersHorizontal,
+                allowed: canUseCustomBuilder,
+              },
+            ] as {
+              id: ReportCategoryTab;
+              labelAr: string;
+              icon: React.ComponentType<{ className?: string }>;
+              allowed: boolean;
+            }[]
+          )
+            .filter((t) => t.allowed)
+            .map((t) => {
             const Icon = t.icon;
             const active = catTab === t.id;
             return (
@@ -452,14 +489,16 @@ export function ReportsCenterView() {
             );
           })}
         </div>
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="min-h-[36px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer"
-        >
-          <Printer className="w-3.5 h-3.5" />
-          <span>طباعة مباشرة</span>
-        </button>
+        {canExportReports && (
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="min-h-[36px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold inline-flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span>طباعة مباشرة</span>
+          </button>
+        )}
       </div>
 
       {/* SECTION A: REAL ESTATE REPORTS */}
@@ -475,6 +514,7 @@ export function ReportsCenterView() {
                 </h3>
                 <p className="text-[11px] text-slate-500">نسبة الإشغال الفعلي ومقارنة العوائد لكل عقار مع رسم بياني</p>
               </div>
+              {canExportReports && (
               <div className="flex flex-wrap items-center gap-2 no-print">
                 <button
                   type="button"
@@ -545,6 +585,7 @@ export function ReportsCenterView() {
                   <span>PDF</span>
                 </button>
               </div>
+              )}
             </div>
 
             <div className="h-64 w-full" dir="ltr">
@@ -732,40 +773,44 @@ export function ReportsCenterView() {
                     </button>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    exportSheetExcel(
-                      `AqarPlus-PnL-${pnlPeriod}.xlsx`,
-                      'الأرباح والخسائر',
-                      ['الفترة', 'الإيرادات', 'المصروفات', 'صافي الربح'],
-                      financialData.pnlRows.map((r) => [r.label, r.income, r.expense, r.net])
-                    )
-                  }
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Excel</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    exportBrandedReportPdf(
-                      `تقرير الأرباح والخسائر (${pnlPeriod === 'monthly' ? 'شهري' : pnlPeriod === 'quarterly' ? 'ربع سنوي' : 'سنوي'})`,
-                      ['الفترة', 'الإيرادات', 'المصروفات', 'صافي الربح / الخسارة'],
-                      financialData.pnlRows.map((r) => [
-                        r.label,
-                        formatCurrency(r.income, baseCurrency, lang),
-                        formatCurrency(r.expense, baseCurrency, lang),
-                        formatCurrency(r.net, baseCurrency, lang),
-                      ])
-                    )
-                  }
-                  className="px-3 py-1.5 rounded-xl bg-[#26478D] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>PDF</span>
-                </button>
+                {canExportReports && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        exportSheetExcel(
+                          `AqarPlus-PnL-${pnlPeriod}.xlsx`,
+                          'الأرباح والخسائر',
+                          ['الفترة', 'الإيرادات', 'المصروفات', 'صافي الربح'],
+                          financialData.pnlRows.map((r) => [r.label, r.income, r.expense, r.net])
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>Excel</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        exportBrandedReportPdf(
+                          `تقرير الأرباح والخسائر (${pnlPeriod === 'monthly' ? 'شهري' : pnlPeriod === 'quarterly' ? 'ربع سنوي' : 'سنوي'})`,
+                          ['الفترة', 'الإيرادات', 'المصروفات', 'صافي الربح / الخسارة'],
+                          financialData.pnlRows.map((r) => [
+                            r.label,
+                            formatCurrency(r.income, baseCurrency, lang),
+                            formatCurrency(r.expense, baseCurrency, lang),
+                            formatCurrency(r.net, baseCurrency, lang),
+                          ])
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-xl bg-[#26478D] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>PDF</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -889,52 +934,54 @@ export function ReportsCenterView() {
                   </span>
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2 no-print">
-                <button
-                  type="button"
-                  onClick={() =>
-                    exportSheetExcel(
-                      'AqarPlus-HR-Commissions.xlsx',
-                      'أداء الموظفين والعمولات',
-                      ['الموظف', 'الدور', 'المهام المنجزة', 'المتأخرة', 'نسبة الإنجاز %', 'التقييم', 'العمولة المستحقة'],
-                      hrData.staffRows.map((r) => [
-                        r.name,
-                        r.role,
-                        r.completed,
-                        r.overdue,
-                        r.completionPct,
-                        r.rating,
-                        r.commissionAmount,
-                      ])
-                    )
-                  }
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Excel</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    exportBrandedReportPdf(
-                      'تقرير أداء الموظفين والعمولات',
-                      ['الموظف', 'الدور', 'المهام المنجزة', 'المتأخرة', 'نسبة الإنجاز', 'العمولة'],
-                      hrData.staffRows.map((r) => [
-                        r.name,
-                        r.role,
-                        r.completed,
-                        r.overdue,
-                        `${r.completionPct}%`,
-                        formatCurrency(r.commissionAmount, baseCurrency, lang),
-                      ])
-                    )
-                  }
-                  className="px-3 py-1.5 rounded-xl bg-[#26478D] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>PDF</span>
-                </button>
-              </div>
+              {canExportReports && (
+                <div className="flex flex-wrap items-center gap-2 no-print">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportSheetExcel(
+                        'AqarPlus-HR-Commissions.xlsx',
+                        'أداء الموظفين والعمولات',
+                        ['الموظف', 'الدور', 'المهام المنجزة', 'المتأخرة', 'نسبة الإنجاز %', 'التقييم', 'العمولة المستحقة'],
+                        hrData.staffRows.map((r) => [
+                          r.name,
+                          r.role,
+                          r.completed,
+                          r.overdue,
+                          r.completionPct,
+                          r.rating,
+                          r.commissionAmount,
+                        ])
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Excel</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportBrandedReportPdf(
+                        'تقرير أداء الموظفين والعمولات',
+                        ['الموظف', 'الدور', 'المهام المنجزة', 'المتأخرة', 'نسبة الإنجاز', 'العمولة'],
+                        hrData.staffRows.map((r) => [
+                          r.name,
+                          r.role,
+                          r.completed,
+                          r.overdue,
+                          `${r.completionPct}%`,
+                          formatCurrency(r.commissionAmount, baseCurrency, lang),
+                        ])
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-[#26478D] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>PDF</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">

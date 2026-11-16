@@ -333,7 +333,7 @@ export class SqlitePersistence {
 
       const deleteCollection = this.db.prepare(`DELETE FROM entities WHERE collection = ?`);
       const insertEntity = this.db.prepare(
-        `INSERT INTO entities (collection, id, sort_order, revision, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT OR REPLACE INTO entities (collection, id, sort_order, revision, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)`
       );
       const upsertAttachment = this.db.prepare(
         `INSERT OR REPLACE INTO attachments (id, related_type, related_id, mime_type, size_bytes, content_base64, disk_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -403,18 +403,45 @@ export class SqlitePersistence {
       );
   }
 
-  public ensureSeedCredentials(users: { id: string; role: string }[]): void {
-    const defaultPasswordHash = hashSecret('Aqar@2026');
-    const defaultPinHash = hashSecret('1234');
+  public ensureSeedCredentials(users: { id: string; role: string; email?: string }[]): void {
+    const allowDefaults =
+      process.env.NODE_ENV !== 'production' ||
+      process.env.AQAR_ALLOW_SEED_DEFAULTS === 'true' ||
+      process.env.AQAR_DEMO_LOGIN === 'true';
+    const bootstrapPassword = (process.env.AQAR_BOOTSTRAP_ADMIN_PASSWORD || '').trim();
+    const bootstrapEmail = (process.env.AQAR_BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
+    const bootstrapPin = (process.env.AQAR_BOOTSTRAP_ADMIN_PIN || '').trim();
+
+    if (!allowDefaults && !bootstrapPassword) {
+      return;
+    }
+
     const now = new Date().toISOString();
     const check = this.db.prepare(`SELECT user_id FROM user_credentials WHERE user_id = ?`);
     const insert = this.db.prepare(
       `INSERT INTO user_credentials (user_id, password_hash, pin_hash, updated_at) VALUES (?, ?, ?, ?)`
     );
-    for (const u of users) {
-      const existing = check.get(u.id);
-      if (!existing) {
-        insert.run(u.id, defaultPasswordHash, defaultPinHash, now);
+
+    if (allowDefaults) {
+      const defaultPasswordHash = hashSecret('Aqar@2026');
+      const defaultPinHash = hashSecret('1234');
+      for (const u of users) {
+        const existing = check.get(u.id);
+        if (!existing) {
+          insert.run(u.id, defaultPasswordHash, defaultPinHash, now);
+        }
+      }
+      return;
+    }
+
+    // Strict production bootstrap: only configure explicit bootstrap admin credentials if provided via env
+    if (bootstrapPassword.length >= 8) {
+      const targetAdmin =
+        users.find((u) => bootstrapEmail && u.email && u.email.toLowerCase() === bootstrapEmail) ||
+        users.find((u) => u.role === 'sys_owner');
+      if (targetAdmin && !check.get(targetAdmin.id)) {
+        const pinHash = /^\d{4,6}$/.test(bootstrapPin) ? hashSecret(bootstrapPin) : null;
+        insert.run(targetAdmin.id, hashSecret(bootstrapPassword), pinHash, now);
       }
     }
   }
@@ -439,7 +466,9 @@ export class SqlitePersistence {
       .prepare(`SELECT password_hash as passwordHash, pin_hash as pinHash FROM user_credentials WHERE user_id = ?`)
       .get(userId) as { passwordHash: string; pinHash: string | null } | undefined;
 
-    const nextPasswordHash = input.password ? hashSecret(input.password) : existing?.passwordHash || hashSecret('Aqar@2026');
+    const nextPasswordHash = input.password
+      ? hashSecret(input.password)
+      : existing?.passwordHash || hashSecret(crypto.randomBytes(24).toString('base64url'));
     const nextPinHash = input.pin ? hashSecret(input.pin) : existing?.pinHash || null;
 
     this.db

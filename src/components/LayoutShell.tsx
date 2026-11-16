@@ -45,6 +45,7 @@ export function LayoutShell({ children }: LayoutShellProps) {
     currentUser,
     switchUser,
     canAccessNav,
+    hasPermission,
     demoLoginEnabled,
     lang,
     setLang,
@@ -209,8 +210,11 @@ export function LayoutShell({ children }: LayoutShellProps) {
         results.push({ typeAr: 'مستند', typeEn: 'Document', title: doc.title, subtitle: `${doc.category} · ${doc.fileName}`, nav: 'documents', score });
       }
     }
-    return results.sort((a, b) => b.score - a.score).slice(0, 8);
-  }, [searchQuery, state]);
+    return results
+      .filter((r) => canAccessNav(r.nav))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+  }, [searchQuery, state, canAccessNav]);
 
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-[#0A0E1A] text-slate-900 dark:text-slate-100">
@@ -528,22 +532,26 @@ export function LayoutShell({ children }: LayoutShellProps) {
                         setUserMenuOpen(false);
                         openOnboarding('splash', true);
                       }}
-                      className="flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-medium border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer"
+                      className={`${
+                        hasPermission('manage_properties') ? '' : 'col-span-2 '
+                      }flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-medium border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer`}
                     >
                       <Lock className="w-3.5 h-3.5 text-[#26478D] dark:text-blue-400" />
                       <span>{lang === 'ar' ? 'قفل PIN' : 'Lock PIN'}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        openOnboarding('company', false);
-                      }}
-                      className="flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-medium bg-[#26478D]/10 text-[#26478D] dark:text-blue-300 hover:bg-[#26478D]/20 cursor-pointer"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>{lang === 'ar' ? 'معالج البداية' : 'Setup Wizard'}</span>
-                    </button>
+                    {hasPermission('manage_properties') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          openOnboarding('company', false);
+                        }}
+                        className="flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-medium bg-[#26478D]/10 text-[#26478D] dark:text-blue-300 hover:bg-[#26478D]/20 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{lang === 'ar' ? 'معالج البداية' : 'Setup Wizard'}</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -638,16 +646,18 @@ export function LayoutShell({ children }: LayoutShellProps) {
                         </button>
                       ))}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotifOpen(false);
-                        setActiveNav('settings');
-                      }}
-                      className="text-[10px] text-[#26478D] dark:text-blue-400 hover:underline cursor-pointer"
-                    >
-                      تخصيص
-                    </button>
+                    {canAccessNav('settings') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotifOpen(false);
+                          setActiveNav('settings');
+                        }}
+                        className="text-[10px] text-[#26478D] dark:text-blue-400 hover:underline cursor-pointer"
+                      >
+                        تخصيص
+                      </button>
+                    )}
                   </div>
                   <div className="divide-y divide-slate-100 dark:divide-white/5 max-h-80 overflow-y-auto">
                     {roleNotifications.length === 0 ? (

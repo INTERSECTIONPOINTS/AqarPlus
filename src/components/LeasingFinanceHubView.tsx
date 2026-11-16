@@ -6,29 +6,62 @@ import { FinanceCollectionView } from './FinanceCollectionView';
 import { AccountingOwnersView } from './AccountingOwnersView';
 
 export function LeasingFinanceHubView() {
-  const { leasingFinanceTab, setLeasingFinanceTab, lang, currentUser } = useAqar();
+  const { leasingFinanceTab, setLeasingFinanceTab, lang, currentUser, hasModulePermission, hasPermission } = useAqar();
   const isAr = lang === 'ar';
+  const isOwner = currentUser?.role === 'owner';
 
-  const tabs: {
+  const allTabs: {
     id: LeasingFinanceTab;
     labelAr: string;
     labelEn: string;
     icon: React.ComponentType<{ className?: string }>;
+    allowed: boolean;
   }[] = [
-    { id: 'leasing', labelAr: 'العقود والتأجير والإخلاء', labelEn: 'Contracts & Leasing', icon: FileSignature },
-    { id: 'finance', labelAr: 'الدفعات والتحصيل والسندات', labelEn: 'Rent & Receipts', icon: Wallet },
-    { id: 'accounting', labelAr: 'المحاسبة والملاك والمصروفات', labelEn: 'Accounting & Owners', icon: Calculator },
+    {
+      id: 'leasing',
+      labelAr: 'العقود والتأجير والإخلاء',
+      labelEn: 'Contracts & Leasing',
+      icon: FileSignature,
+      allowed: isOwner || hasModulePermission('contracts', 'view') || hasPermission('manage_contracts'),
+    },
+    {
+      id: 'finance',
+      labelAr: 'الدفعات والتحصيل والسندات',
+      labelEn: 'Rent & Receipts',
+      icon: Wallet,
+      allowed:
+        isOwner ||
+        hasModulePermission('payments', 'view') ||
+        hasModulePermission('receipts', 'view') ||
+        hasModulePermission('finance', 'view') ||
+        hasPermission('collect_payments'),
+    },
+    {
+      id: 'accounting',
+      labelAr: 'المحاسبة والملاك والمصروفات',
+      labelEn: 'Accounting & Owners',
+      icon: Calculator,
+      allowed:
+        isOwner ||
+        hasModulePermission('finance', 'view') ||
+        hasModulePermission('expenses', 'view') ||
+        hasPermission('manage_accounting') ||
+        hasPermission('create_expense'),
+    },
   ];
 
-  // Technicians only have access if navigating directly, owners have access to all 3 scoped to owned props
-  const activeTab = currentUser?.role === 'technician' ? 'leasing' : leasingFinanceTab;
+  const tabs = allTabs.filter((t) => t.allowed);
+  const effectiveTabs = tabs.length > 0 ? tabs : [allTabs[0]];
+  const activeTab = effectiveTabs.some((t) => t.id === leasingFinanceTab)
+    ? leasingFinanceTab
+    : effectiveTabs[0].id;
 
   return (
     <div className="space-y-5">
       {/* Sub-Navigation Tabs inside Leasing & Finance */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-1.5 rounded-2xl border border-slate-200 dark:border-white/10 glass-surface no-print">
         <div className="flex flex-wrap items-center gap-1.5">
-          {tabs.map((t) => {
+          {effectiveTabs.map((t) => {
             const Icon = t.icon;
             const isActive = activeTab === t.id;
             return (

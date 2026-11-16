@@ -10,6 +10,7 @@ const TEST_PORT = 3456;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 
 process.env.NODE_ENV = 'production';
+process.env.AQAR_ALLOW_SEED_DEFAULTS = 'true';
 process.env.AQARPLUS_NO_AUTO_START = '1';
 process.env.AQARPLUS_USER_DATA_DIR = TMP_DATA_DIR;
 process.env.AQARPLUS_DIST_DIR = path.resolve(process.cwd(), 'dist');
@@ -95,7 +96,9 @@ async function runTests() {
       },
       body: JSON.stringify({ role: 'technician', permission: 'manage_users' }),
     });
-    assert.equal(forbiddenToggle.status, 400, 'Technician must be blocked from toggling permissions');
+    assert.equal(forbiddenToggle.status, 403, 'Technician must be blocked with 403 from toggling permissions');
+    const forbiddenToggleJson = await forbiddenToggle.json();
+    assert.equal(forbiddenToggleJson.code, 'FORBIDDEN');
     console.log('✓ 4. RBAC & data isolation verified (audit/backups hidden, unauthorized actions blocked)');
 
     // 5. Idempotent offline sync/batch + duplicate detection + conflict detection

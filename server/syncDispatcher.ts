@@ -357,10 +357,15 @@ export function dispatchSyncOperation(
       data: { error: `نقطة النهاية غير مدعومة للمزامنة (${method} ${endpoint})` },
     };
   } catch (err: unknown) {
+    const e = err as { statusCode?: number; name?: string; message?: string };
+    const status = e?.statusCode === 403 || e?.name === 'PermissionDeniedError' ? 403 : 400;
     return {
       ok: false,
-      status: 400,
-      data: { error: (err as Error).message },
+      status,
+      data: {
+        error: e?.message || 'خطأ في العملية',
+        ...(status === 403 ? { code: 'FORBIDDEN' } : {}),
+      },
     };
   }
 }

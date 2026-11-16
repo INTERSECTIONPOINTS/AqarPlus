@@ -1,14 +1,17 @@
 // server.ts
+import fs3 from "fs";
 import http from "http";
-import path2 from "path";
+import path3 from "path";
+import crypto4 from "crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import dotenv from "dotenv";
 
 // server/store.ts
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
+import fs2 from "fs";
+import path2 from "path";
+import crypto3 from "crypto";
 
 // server/seed.ts
 var DEFAULT_ROLE_PERMISSIONS = {
@@ -294,7 +297,7 @@ function createInitialSeed() {
         managerRating: 5,
         lastActivitySummary: "\u0645\u0631\u0627\u062C\u0639\u0629 \u0633\u064A\u0627\u0633\u0629 \u0627\u0644\u0623\u0645\u0627\u0646 \u0648\u0627\u0644\u0646\u0633\u062E \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0627\u0644\u064A\u0648\u0645\u064A\u0629",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: true,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-20T09:00:00.000Z",
@@ -327,7 +330,7 @@ function createInitialSeed() {
         managerRating: 5,
         lastActivitySummary: "\u0627\u0639\u062A\u0645\u062F \u0645\u0635\u0631\u0648\u0641 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0645\u062C\u0645\u0639 \u0642\u0628\u0644 18 \u062F\u0642\u064A\u0642\u0629",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: true,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-25T10:00:00.000Z",
@@ -360,7 +363,7 @@ function createInitialSeed() {
         managerRating: 4.8,
         lastActivitySummary: "\u0633\u062C\u0644 \u0633\u0646\u062F \u0642\u0628\u0636 9,000 \u0631.\u0633 \u0642\u0628\u0644 5 \u062F\u0642\u0627\u0626\u0642",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: false,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-15T11:00:00.000Z",
@@ -555,7 +558,7 @@ function createInitialSeed() {
         managerRating: 5,
         lastActivitySummary: "\u0635\u062F\u0651\u0631 \u062A\u0642\u0631\u064A\u0631 \u0627\u0644\u062A\u062F\u0642\u064A\u0642 \u0627\u0644\u0634\u0647\u0631\u064A \u0648\u0633\u062C\u0644 \u0627\u0644\u0639\u0643\u0633 \u0627\u0644\u0645\u062D\u0627\u0633\u0628\u064A",
         security: {
-          twoFactorEnabled: true,
+          twoFactorEnabled: false,
           biometricEnabled: false,
           failedAttempts: 0,
           lastPasswordChangedAt: "2026-10-18T09:00:00.000Z",
@@ -2956,7 +2959,1217 @@ function createInitialSeed() {
   };
 }
 
+// server/cryptoAuth.ts
+import crypto from "crypto";
+var SCRYPT_KEYLEN = 64;
+var SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+var PBKDF2_ITERATIONS = 1e5;
+function hashSecret(secret) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const derived = crypto.scryptSync(secret, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS).toString("hex");
+  return `scrypt$${salt}$${derived}`;
+}
+function verifySecret(secret, storedHash) {
+  if (!storedHash || !secret) return false;
+  const parts = storedHash.split("$");
+  if (parts.length !== 3 || parts[0] !== "scrypt") return false;
+  const [, salt, hexHash] = parts;
+  if (!salt || !hexHash) return false;
+  try {
+    const derived = crypto.scryptSync(secret, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
+    const expected = Buffer.from(hexHash, "hex");
+    if (derived.length !== expected.length) return false;
+    return crypto.timingSafeEqual(derived, expected);
+  } catch {
+    return false;
+  }
+}
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+function toBase64Url(input) {
+  const buf = typeof input === "string" ? Buffer.from(input, "utf8") : input;
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function fromBase64Url(input) {
+  const padded = input.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((input.length + 3) % 4);
+  return Buffer.from(padded, "base64");
+}
+function signSessionToken(payload, secret) {
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const sig = crypto.createHmac("sha256", secret).update(encodedPayload).digest();
+  return `${encodedPayload}.${toBase64Url(sig)}`;
+}
+function verifySessionToken(token, secret) {
+  if (!token || !secret) return null;
+  const dotIdx = token.indexOf(".");
+  if (dotIdx <= 0) return null;
+  const encodedPayload = token.slice(0, dotIdx);
+  const encodedSig = token.slice(dotIdx + 1);
+  if (!encodedPayload || !encodedSig) return null;
+  try {
+    const expectedSig = crypto.createHmac("sha256", secret).update(encodedPayload).digest();
+    const providedSig = fromBase64Url(encodedSig);
+    if (expectedSig.length !== providedSig.length) return null;
+    if (!crypto.timingSafeEqual(expectedSig, providedSig)) return null;
+    const payload = JSON.parse(fromBase64Url(encodedPayload).toString("utf8"));
+    if (!payload || !payload.uid || !payload.sid || typeof payload.exp !== "number") return null;
+    if (Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+function signEphemeralToken(payload, secret) {
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const sig = crypto.createHmac("sha256", secret).update(`eph:${encodedPayload}`).digest();
+  return `${encodedPayload}.${toBase64Url(sig)}`;
+}
+function verifyEphemeralToken(token, secret) {
+  if (!token || !secret) return null;
+  const dotIdx = token.indexOf(".");
+  if (dotIdx <= 0) return null;
+  const encodedPayload = token.slice(0, dotIdx);
+  const encodedSig = token.slice(dotIdx + 1);
+  if (!encodedPayload || !encodedSig) return null;
+  try {
+    const expectedSig = crypto.createHmac("sha256", secret).update(`eph:${encodedPayload}`).digest();
+    const providedSig = fromBase64Url(encodedSig);
+    if (expectedSig.length !== providedSig.length) return null;
+    if (!crypto.timingSafeEqual(expectedSig, providedSig)) return null;
+    const payload = JSON.parse(fromBase64Url(encodedPayload).toString("utf8"));
+    if (!payload || typeof payload.exp !== "number" || Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+function encryptBackupPayload(plaintextJson, password) {
+  const normalized = (password || "").trim();
+  if (normalized.length < 4) {
+    throw new Error("\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0627\u0644\u062A\u0634\u0641\u064A\u0631 \u064A\u062C\u0628 \u0623\u0646 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 4 \u0623\u062D\u0631\u0641/\u0623\u0631\u0642\u0627\u0645");
+  }
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = crypto.pbkdf2Sync(normalized, salt, PBKDF2_ITERATIONS, 32, "sha256");
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintextJson, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const envelope = {
+    format: "aqarplus-aes-256-gcm",
+    version: 1,
+    kdf: "pbkdf2-sha256",
+    iterations: PBKDF2_ITERATIONS,
+    salt: salt.toString("base64"),
+    iv: iv.toString("base64"),
+    tag: tag.toString("base64"),
+    ciphertext: encrypted.toString("base64"),
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  return JSON.stringify(envelope, null, 2);
+}
+function isEncryptedBackupEnvelope(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.format === "aqarplus-aes-256-gcm" && typeof parsed.ciphertext === "string";
+  } catch {
+    return false;
+  }
+}
+function decryptBackupPayload(rawEnvelope, password) {
+  const envelope = JSON.parse(rawEnvelope);
+  if (envelope.format !== "aqarplus-aes-256-gcm") {
+    return rawEnvelope;
+  }
+  const normalized = (password || "").trim();
+  if (!normalized) {
+    throw new Error("\u0647\u0630\u0647 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u0645\u0634\u0641\u0631\u0629 \u2014 \u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0641\u0643 \u0627\u0644\u062A\u0634\u0641\u064A\u0631");
+  }
+  try {
+    const salt = Buffer.from(envelope.salt, "base64");
+    const iv = Buffer.from(envelope.iv, "base64");
+    const tag = Buffer.from(envelope.tag, "base64");
+    const ciphertext = Buffer.from(envelope.ciphertext, "base64");
+    const key = crypto.pbkdf2Sync(
+      normalized,
+      salt,
+      envelope.iterations || PBKDF2_ITERATIONS,
+      32,
+      "sha256"
+    );
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return decrypted.toString("utf8");
+  } catch {
+    throw new Error("\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0641\u0643 \u0627\u0644\u062A\u0634\u0641\u064A\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629 \u0623\u0648 \u0623\u0646 \u0645\u0644\u0641 \u0627\u0644\u0646\u0633\u062E\u0629 \u062A\u0627\u0644\u0641");
+  }
+}
+
+// server/sqlitePersistence.ts
+import fs from "fs";
+import path from "path";
+import crypto2 from "crypto";
+import { DatabaseSync } from "node:sqlite";
+var ARRAY_COLLECTIONS = [
+  "companies",
+  "users",
+  "employeeInvitations",
+  "customRoles",
+  "properties",
+  "units",
+  "meterReadings",
+  "owners",
+  "vendors",
+  "tenants",
+  "leads",
+  "leadEscalations",
+  "contracts",
+  "handovers",
+  "installments",
+  "payments",
+  "accounts",
+  "journals",
+  "expenses",
+  "supplierInvoices",
+  "recurringExpenses",
+  "propertyBudgets",
+  "assets",
+  "tickets",
+  "tasks",
+  "communications",
+  "documents",
+  "purchaseOrders",
+  "decisions",
+  "notifications",
+  "reminderRules",
+  "reminderLogs",
+  "auditLogs",
+  "backups",
+  "savedArchiveFilters",
+  "loginHistory",
+  "syncConflicts",
+  "scheduledReports",
+  "favoriteReports",
+  "sharedSearchFilters",
+  "zatcaInvoices",
+  "communicationTemplates"
+];
+var SINGLETON_KEYS = [
+  "settings",
+  "rolePermissions",
+  "roleModulePermissions",
+  "counters",
+  "processedIdempotencyKeys",
+  "archiveLastNightlyRun",
+  "archiveSeeded",
+  "securityPolicy",
+  "communicationTemplates",
+  "teamSeeded",
+  "syncRevision",
+  "entityRevisions",
+  "lastUpdatedAt"
+];
+var SqlitePersistence = class {
+  constructor(dataDir) {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    this.dbPath = path.join(dataDir, "aqarplus.sqlite");
+    this.db = new DatabaseSync(this.dbPath);
+    this.initSchema();
+  }
+  initSchema() {
+    this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA foreign_keys = ON;
+
+      CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS entities (
+        collection TEXT NOT NULL,
+        id TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (collection, id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entities_collection ON entities (collection, sort_order);
+
+      CREATE TABLE IF NOT EXISTS operations_log (
+        operation_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id TEXT,
+        result_json TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash TEXT PRIMARY KEY,
+        session_id TEXT,
+        user_id TEXT NOT NULL,
+        device_name TEXT NOT NULL,
+        app_type TEXT DEFAULT 'web',
+        device_id TEXT,
+        ip_address TEXT,
+        remember_me INTEGER NOT NULL DEFAULT 1,
+        refresh_token_hash TEXT,
+        refresh_expires_at TEXT,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, revoked_at);
+
+      CREATE TABLE IF NOT EXISTS trusted_devices (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        device_hash TEXT NOT NULL,
+        device_name TEXT NOT NULL,
+        app_type TEXT NOT NULL DEFAULT 'web',
+        trusted_at TEXT NOT NULL,
+        last_used_at TEXT NOT NULL,
+        revoked_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_trusted_devices_user ON trusted_devices (user_id, device_hash, revoked_at);
+
+      CREATE TABLE IF NOT EXISTS user_credentials (
+        user_id TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        pin_hash TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS invite_secrets (
+        invitation_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        company_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        code_hash TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        canceled_at TEXT,
+        failed_attempts INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_invite_token_hash ON invite_secrets (token_hash);
+
+      CREATE TABLE IF NOT EXISTS recovery_tokens (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        target_value TEXT,
+        code_hash TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        failed_attempts INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_recovery_user_purpose ON recovery_tokens (user_id, purpose, used_at);
+
+      CREATE TABLE IF NOT EXISTS attachments (
+        id TEXT PRIMARY KEY,
+        related_type TEXT,
+        related_id TEXT,
+        mime_type TEXT,
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        content_base64 TEXT,
+        disk_path TEXT,
+        created_at TEXT NOT NULL
+      );
+    `);
+    const cols = this.db.prepare(`PRAGMA table_info(sessions)`).all().map((c) => c.name);
+    if (!cols.includes("session_id")) this.db.exec(`ALTER TABLE sessions ADD COLUMN session_id TEXT`);
+    if (!cols.includes("ip_address")) this.db.exec(`ALTER TABLE sessions ADD COLUMN ip_address TEXT`);
+    if (!cols.includes("remember_me")) this.db.exec(`ALTER TABLE sessions ADD COLUMN remember_me INTEGER NOT NULL DEFAULT 1`);
+    if (!cols.includes("last_seen_at")) this.db.exec(`ALTER TABLE sessions ADD COLUMN last_seen_at TEXT`);
+    if (!cols.includes("app_type")) this.db.exec(`ALTER TABLE sessions ADD COLUMN app_type TEXT DEFAULT 'web'`);
+    if (!cols.includes("device_id")) this.db.exec(`ALTER TABLE sessions ADD COLUMN device_id TEXT`);
+    if (!cols.includes("refresh_token_hash")) this.db.exec(`ALTER TABLE sessions ADD COLUMN refresh_token_hash TEXT`);
+    if (!cols.includes("refresh_expires_at")) this.db.exec(`ALTER TABLE sessions ADD COLUMN refresh_expires_at TEXT`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_refresh ON sessions (refresh_token_hash);`);
+  }
+  getOrCreateSessionSecret() {
+    if (process.env.AQAR_SESSION_SECRET && process.env.AQAR_SESSION_SECRET.length >= 16) {
+      return process.env.AQAR_SESSION_SECRET;
+    }
+    const row = this.db.prepare(`SELECT value FROM meta WHERE key = 'session_secret'`).get();
+    if (row?.value) return row.value;
+    const generated = crypto2.randomBytes(32).toString("hex");
+    this.db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('session_secret', ?)`).run(generated);
+    return generated;
+  }
+  hasState() {
+    const row = this.db.prepare(`SELECT value FROM meta WHERE key = 'singleton:settings'`).get();
+    return Boolean(row?.value);
+  }
+  loadState() {
+    if (!this.hasState()) return null;
+    const result = {};
+    const metaRows = this.db.prepare(`SELECT key, value FROM meta WHERE key LIKE 'singleton:%'`).all();
+    for (const row of metaRows) {
+      const prop = row.key.slice("singleton:".length);
+      try {
+        result[prop] = JSON.parse(row.value);
+      } catch {
+        result[prop] = row.value;
+      }
+    }
+    for (const col of ARRAY_COLLECTIONS) {
+      if (col === "communicationTemplates" && Array.isArray(result[col])) continue;
+      const rows = this.db.prepare(`SELECT data FROM entities WHERE collection = ? ORDER BY sort_order ASC`).all(String(col));
+      result[String(col)] = rows.map((r) => JSON.parse(r.data));
+    }
+    return result;
+  }
+  saveState(state) {
+    const now = state.lastUpdatedAt || (/* @__PURE__ */ new Date()).toISOString();
+    const revisions = state.entityRevisions || {};
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const upsertMeta = this.db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)`);
+      for (const key of SINGLETON_KEYS) {
+        const val = state[key];
+        if (val !== void 0) {
+          upsertMeta.run(`singleton:${String(key)}`, JSON.stringify(val));
+        }
+      }
+      const deleteCollection = this.db.prepare(`DELETE FROM entities WHERE collection = ?`);
+      const insertEntity = this.db.prepare(
+        `INSERT INTO entities (collection, id, sort_order, revision, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)`
+      );
+      const upsertAttachment = this.db.prepare(
+        `INSERT OR REPLACE INTO attachments (id, related_type, related_id, mime_type, size_bytes, content_base64, disk_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const col of ARRAY_COLLECTIONS) {
+        const list = state[col] || [];
+        deleteCollection.run(String(col));
+        for (let idx = 0; idx < list.length; idx++) {
+          const item = list[idx];
+          const entityId = String(item?.id || `${String(col)}-${idx}`);
+          const revKey = `${String(col)}:${entityId}`;
+          const rev = revisions[revKey] || 1;
+          insertEntity.run(String(col), entityId, idx, rev, now, JSON.stringify(item));
+          if (col === "documents" && typeof item?.dataUrl === "string" && item.dataUrl.length > 0) {
+            upsertAttachment.run(
+              entityId,
+              String(item.relatedType || "document"),
+              String(item.relatedId || ""),
+              String(item.fileType || "application/octet-stream"),
+              Math.round(Buffer.byteLength(item.dataUrl, "utf8")),
+              item.dataUrl,
+              typeof item.diskPath === "string" ? item.diskPath : null,
+              String(item.createdAt || now)
+            );
+          }
+        }
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+      }
+      throw err;
+    }
+  }
+  hasOperation(operationId) {
+    if (!operationId) return null;
+    const row = this.db.prepare(
+      `SELECT operation_id as operationId, user_id as userId, method, endpoint, entity_type as entityType, entity_id as entityId, result_json as resultJson, status, created_at as createdAt FROM operations_log WHERE operation_id = ?`
+    ).get(operationId);
+    return row || null;
+  }
+  recordOperation(entry) {
+    this.db.prepare(
+      `INSERT OR IGNORE INTO operations_log (operation_id, user_id, method, endpoint, entity_type, entity_id, result_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      entry.operationId,
+      entry.userId,
+      entry.method,
+      entry.endpoint,
+      entry.entityType || null,
+      entry.entityId || null,
+      entry.resultJson || null,
+      entry.status,
+      entry.createdAt
+    );
+  }
+  ensureSeedCredentials(users) {
+    const defaultPasswordHash = hashSecret("Aqar@2026");
+    const defaultPinHash = hashSecret("1234");
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const check = this.db.prepare(`SELECT user_id FROM user_credentials WHERE user_id = ?`);
+    const insert = this.db.prepare(
+      `INSERT INTO user_credentials (user_id, password_hash, pin_hash, updated_at) VALUES (?, ?, ?, ?)`
+    );
+    for (const u of users) {
+      const existing = check.get(u.id);
+      if (!existing) {
+        insert.run(u.id, defaultPasswordHash, defaultPinHash, now);
+      }
+    }
+  }
+  verifyUserPassword(userId, password) {
+    const row = this.db.prepare(`SELECT password_hash as passwordHash FROM user_credentials WHERE user_id = ?`).get(userId);
+    return verifySecret(password, row?.passwordHash);
+  }
+  verifyUserPin(userId, pin) {
+    const row = this.db.prepare(`SELECT pin_hash as pinHash FROM user_credentials WHERE user_id = ?`).get(userId);
+    return verifySecret(pin, row?.pinHash);
+  }
+  updateUserCredentials(userId, input) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const existing = this.db.prepare(`SELECT password_hash as passwordHash, pin_hash as pinHash FROM user_credentials WHERE user_id = ?`).get(userId);
+    const nextPasswordHash = input.password ? hashSecret(input.password) : existing?.passwordHash || hashSecret("Aqar@2026");
+    const nextPinHash = input.pin ? hashSecret(input.pin) : existing?.pinHash || null;
+    this.db.prepare(
+      `INSERT OR REPLACE INTO user_credentials (user_id, password_hash, pin_hash, updated_at) VALUES (?, ?, ?, ?)`
+    ).run(userId, nextPasswordHash, nextPinHash, now);
+  }
+  disableUserPin(userId) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    this.db.prepare(`UPDATE user_credentials SET pin_hash = NULL, updated_at = ? WHERE user_id = ?`).run(now, userId);
+  }
+  getCredentialStatus(userId) {
+    const row = this.db.prepare(`SELECT user_id as userId, password_hash as passwordHash, pin_hash as pinHash, updated_at as updatedAt FROM user_credentials WHERE user_id = ?`).get(userId);
+    return {
+      userId,
+      hasPassword: Boolean(row?.passwordHash),
+      hasPin: Boolean(row?.pinHash),
+      updatedAt: row?.updatedAt
+    };
+  }
+  createSession(rawToken, userId, deviceName, expiresAt, opts) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    this.db.prepare(
+      `INSERT OR REPLACE INTO sessions (token_hash, session_id, user_id, device_name, app_type, device_id, ip_address, remember_me, refresh_token_hash, refresh_expires_at, created_at, last_seen_at, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+    ).run(
+      sha256Hex(rawToken),
+      opts?.sessionId || null,
+      userId,
+      deviceName,
+      opts?.appType === "desktop" ? "desktop" : "web",
+      opts?.deviceId || null,
+      opts?.ipAddress || null,
+      opts?.rememberMe === false ? 0 : 1,
+      opts?.rawRefreshToken ? sha256Hex(opts.rawRefreshToken) : null,
+      opts?.refreshExpiresAt || null,
+      now,
+      now,
+      expiresAt
+    );
+  }
+  isSessionActive(rawToken) {
+    const row = this.db.prepare(
+      `SELECT token_hash as tokenHash, session_id as sessionId, user_id as userId, device_name as deviceName, app_type as appType, device_id as deviceId, ip_address as ipAddress, remember_me as rememberMeInt, refresh_token_hash as refreshTokenHash, refresh_expires_at as refreshExpiresAt, created_at as createdAt, last_seen_at as lastSeenAt, expires_at as expiresAt, revoked_at as revokedAt FROM sessions WHERE token_hash = ?`
+    ).get(sha256Hex(rawToken));
+    if (!row || row.revokedAt) return null;
+    if (Date.now() > new Date(row.expiresAt).getTime()) return null;
+    return {
+      tokenHash: row.tokenHash,
+      sessionId: row.sessionId,
+      userId: row.userId,
+      deviceName: row.deviceName,
+      appType: row.appType === "desktop" ? "desktop" : "web",
+      deviceId: row.deviceId,
+      ipAddress: row.ipAddress,
+      rememberMe: row.rememberMeInt !== 0,
+      refreshTokenHash: row.refreshTokenHash,
+      refreshExpiresAt: row.refreshExpiresAt,
+      createdAt: row.createdAt,
+      lastSeenAt: row.lastSeenAt || row.createdAt,
+      expiresAt: row.expiresAt,
+      revokedAt: row.revokedAt
+    };
+  }
+  findSessionByRefreshToken(rawRefreshToken) {
+    if (!rawRefreshToken) return null;
+    const row = this.db.prepare(
+      `SELECT token_hash as tokenHash, session_id as sessionId, user_id as userId, device_name as deviceName, app_type as appType, device_id as deviceId, ip_address as ipAddress, remember_me as rememberMeInt, refresh_token_hash as refreshTokenHash, refresh_expires_at as refreshExpiresAt, created_at as createdAt, last_seen_at as lastSeenAt, expires_at as expiresAt, revoked_at as revokedAt FROM sessions WHERE refresh_token_hash = ?`
+    ).get(sha256Hex(rawRefreshToken));
+    if (!row || row.revokedAt) return null;
+    const refExp = row.refreshExpiresAt || row.expiresAt;
+    if (Date.now() > new Date(refExp).getTime()) return null;
+    return {
+      tokenHash: row.tokenHash,
+      sessionId: row.sessionId,
+      userId: row.userId,
+      deviceName: row.deviceName,
+      appType: row.appType === "desktop" ? "desktop" : "web",
+      deviceId: row.deviceId,
+      ipAddress: row.ipAddress,
+      rememberMe: row.rememberMeInt !== 0,
+      refreshTokenHash: row.refreshTokenHash,
+      refreshExpiresAt: row.refreshExpiresAt,
+      createdAt: row.createdAt,
+      lastSeenAt: row.lastSeenAt || row.createdAt,
+      expiresAt: row.expiresAt,
+      revokedAt: row.revokedAt
+    };
+  }
+  rotateSessionTokens(oldRefreshToken, newAccessToken, newRefreshToken, newExpiresAt, newRefreshExpiresAt) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const info = this.db.prepare(
+      `UPDATE sessions SET token_hash = ?, refresh_token_hash = ?, expires_at = ?, refresh_expires_at = ?, last_seen_at = ? WHERE refresh_token_hash = ? AND revoked_at IS NULL`
+    ).run(
+      sha256Hex(newAccessToken),
+      sha256Hex(newRefreshToken),
+      newExpiresAt,
+      newRefreshExpiresAt,
+      now,
+      sha256Hex(oldRefreshToken)
+    );
+    return Number(info.changes || 0) > 0;
+  }
+  updateSessionLastSeen(rawToken) {
+    this.db.prepare(`UPDATE sessions SET last_seen_at = ? WHERE token_hash = ? AND revoked_at IS NULL`).run((/* @__PURE__ */ new Date()).toISOString(), sha256Hex(rawToken));
+  }
+  listActiveSessionsForUser(userId, currentRawToken) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const currentHash = currentRawToken ? sha256Hex(currentRawToken) : "";
+    const rows = this.db.prepare(
+      `SELECT token_hash as tokenHash, session_id as sessionId, user_id as userId, device_name as deviceName, app_type as appType, device_id as deviceId, ip_address as ipAddress, remember_me as rememberMeInt, created_at as createdAt, last_seen_at as lastSeenAt, expires_at as expiresAt FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY created_at DESC`
+    ).all(userId, now);
+    return rows.map((r) => ({
+      id: r.sessionId || r.tokenHash.slice(0, 16),
+      sessionId: r.sessionId || r.tokenHash.slice(0, 16),
+      userId: r.userId,
+      deviceName: r.deviceName,
+      appType: r.appType === "desktop" ? "desktop" : "web",
+      deviceId: r.deviceId || void 0,
+      ipAddress: r.ipAddress || void 0,
+      rememberMe: r.rememberMeInt !== 0,
+      createdAt: r.createdAt,
+      lastSeenAt: r.lastSeenAt || r.createdAt,
+      expiresAt: r.expiresAt,
+      isCurrent: Boolean(currentHash && r.tokenHash === currentHash)
+    }));
+  }
+  revokeSession(rawToken) {
+    this.db.prepare(`UPDATE sessions SET revoked_at = ? WHERE token_hash = ?`).run((/* @__PURE__ */ new Date()).toISOString(), sha256Hex(rawToken));
+  }
+  revokeSessionById(userId, sessionIdOrPrefix) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const info = this.db.prepare(
+      `UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL AND (session_id = ? OR substr(token_hash, 1, 16) = ?)`
+    ).run(now, userId, sessionIdOrPrefix, sessionIdOrPrefix);
+    return Number(info.changes || 0);
+  }
+  revokeOtherSessionsForUser(userId, keepRawToken) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (keepRawToken) {
+      const info2 = this.db.prepare(`UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL AND token_hash != ?`).run(now, userId, sha256Hex(keepRawToken));
+      return Number(info2.changes || 0);
+    }
+    const info = this.db.prepare(`UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`).run(now, userId);
+    return Number(info.changes || 0);
+  }
+  registerOrTouchTrustedDevice(userId, deviceId, deviceName, appType = "web") {
+    if (!deviceId) return;
+    const deviceHash = sha256Hex(`${userId}:${deviceId}`);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const existing = this.db.prepare(`SELECT id FROM trusted_devices WHERE user_id = ? AND device_hash = ? AND revoked_at IS NULL`).get(userId, deviceHash);
+    if (existing) {
+      this.db.prepare(`UPDATE trusted_devices SET device_name = ?, app_type = ?, last_used_at = ? WHERE id = ?`).run(deviceName, appType, now, existing.id);
+      return;
+    }
+    this.db.prepare(
+      `INSERT INTO trusted_devices (id, user_id, device_hash, device_name, app_type, trusted_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`
+    ).run(`td-${crypto2.randomBytes(6).toString("hex")}`, userId, deviceHash, deviceName, appType, now, now);
+  }
+  isTrustedDevice(userId, deviceId) {
+    if (!deviceId) return false;
+    const deviceHash = sha256Hex(`${userId}:${deviceId}`);
+    const row = this.db.prepare(`SELECT id FROM trusted_devices WHERE user_id = ? AND device_hash = ? AND revoked_at IS NULL`).get(userId, deviceHash);
+    return Boolean(row);
+  }
+  listTrustedDevices(userId, currentDeviceId) {
+    const currentHash = currentDeviceId ? sha256Hex(`${userId}:${currentDeviceId}`) : "";
+    const rows = this.db.prepare(
+      `SELECT id, user_id as userId, device_hash as deviceHash, device_name as deviceName, app_type as appType, trusted_at as trustedAt, last_used_at as lastUsedAt FROM trusted_devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY last_used_at DESC`
+    ).all(userId);
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      deviceName: r.deviceName,
+      appType: r.appType === "desktop" ? "desktop" : "web",
+      trustedAt: r.trustedAt,
+      lastUsedAt: r.lastUsedAt,
+      isCurrent: Boolean(currentHash && r.deviceHash === currentHash)
+    }));
+  }
+  revokeTrustedDevice(userId, trustedDeviceId) {
+    const info = this.db.prepare(`UPDATE trusted_devices SET revoked_at = ? WHERE user_id = ? AND id = ? AND revoked_at IS NULL`).run((/* @__PURE__ */ new Date()).toISOString(), userId, trustedDeviceId);
+    return Number(info.changes || 0);
+  }
+  createInviteSecret(input) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    this.db.prepare(
+      `INSERT OR REPLACE INTO invite_secrets (invitation_id, user_id, company_id, token_hash, code_hash, expires_at, used_at, canceled_at, failed_attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?)`
+    ).run(
+      input.invitationId,
+      input.userId,
+      input.companyId,
+      sha256Hex(input.rawToken),
+      hashSecret(input.verificationCode),
+      input.expiresAt,
+      now
+    );
+  }
+  findInviteSecretByToken(rawToken) {
+    if (!rawToken) return null;
+    const row = this.db.prepare(
+      `SELECT invitation_id as invitationId, user_id as userId, company_id as companyId, token_hash as tokenHash, code_hash as codeHash, expires_at as expiresAt, used_at as usedAt, canceled_at as canceledAt, failed_attempts as failedAttempts, created_at as createdAt FROM invite_secrets WHERE token_hash = ?`
+    ).get(sha256Hex(rawToken));
+    return row || null;
+  }
+  verifyAndConsumeInviteSecret(rawToken, verificationCode) {
+    const rec = this.findInviteSecretByToken(rawToken);
+    if (!rec) return { ok: false, reason: "\u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D \u0623\u0648 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" };
+    if (rec.canceledAt) return { ok: false, reason: "\u062A\u0645 \u0625\u0644\u063A\u0627\u0621 \u0647\u0630\u0647 \u0627\u0644\u062F\u0639\u0648\u0629 \u0645\u0646 \u0642\u0650\u0628\u0644 \u0627\u0644\u0625\u062F\u0627\u0631\u0629" };
+    if (rec.usedAt) return { ok: false, reason: "\u062A\u0645 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 \u0647\u0630\u0647 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0633\u0628\u0642\u0627\u064B" };
+    if (Date.now() > new Date(rec.expiresAt).getTime()) {
+      return { ok: false, reason: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u2014 \u0627\u0637\u0644\u0628 \u0645\u0646 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629 \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644", expired: true };
+    }
+    if (rec.failedAttempts >= 5) {
+      return { ok: false, reason: "\u062A\u0645 \u062A\u0639\u0644\u064A\u0642 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0644\u0647\u0630\u0647 \u0627\u0644\u062F\u0639\u0648\u0629 \u0644\u0643\u062B\u0631\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062E\u0627\u0637\u0626\u0629" };
+    }
+    if (!verifySecret(verificationCode.trim(), rec.codeHash)) {
+      this.db.prepare(`UPDATE invite_secrets SET failed_attempts = failed_attempts + 1 WHERE invitation_id = ?`).run(rec.invitationId);
+      return { ok: false, reason: "\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0645\u0643\u0648\u0646 \u0645\u0646 6 \u0623\u0631\u0642\u0627\u0645 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" };
+    }
+    this.db.prepare(`UPDATE invite_secrets SET used_at = ? WHERE invitation_id = ?`).run((/* @__PURE__ */ new Date()).toISOString(), rec.invitationId);
+    return { ok: true, record: rec };
+  }
+  cancelInviteSecret(invitationId) {
+    this.db.prepare(`UPDATE invite_secrets SET canceled_at = ? WHERE invitation_id = ? AND used_at IS NULL`).run((/* @__PURE__ */ new Date()).toISOString(), invitationId);
+  }
+  createRecoveryToken(input) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    this.db.prepare(`UPDATE recovery_tokens SET used_at = ? WHERE user_id = ? AND purpose = ? AND used_at IS NULL`).run(now, input.userId, input.purpose);
+    this.db.prepare(
+      `INSERT INTO recovery_tokens (id, user_id, purpose, target_value, code_hash, expires_at, used_at, failed_attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, ?)`
+    ).run(
+      input.id,
+      input.userId,
+      input.purpose,
+      input.targetValue || null,
+      hashSecret(input.code),
+      input.expiresAt,
+      now
+    );
+  }
+  verifyAndConsumeRecoveryToken(userId, purpose, code) {
+    const row = this.db.prepare(
+      `SELECT id, user_id as userId, purpose, target_value as targetValue, code_hash as codeHash, expires_at as expiresAt, used_at as usedAt, failed_attempts as failedAttempts, created_at as createdAt FROM recovery_tokens WHERE user_id = ? AND purpose = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1`
+    ).get(userId, purpose);
+    if (!row) {
+      return { ok: false, reason: "\u0644\u0627 \u064A\u0648\u062C\u062F \u0637\u0644\u0628 \u0631\u0645\u0632 \u062A\u062D\u0642\u0642 \u0646\u0634\u0637 \u2014 \u0627\u0637\u0644\u0628 \u0631\u0645\u0632\u0627\u064B \u062C\u062F\u064A\u062F\u0627\u064B" };
+    }
+    if (Date.now() > new Date(row.expiresAt).getTime()) {
+      return { ok: false, reason: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u2014 \u0627\u0637\u0644\u0628 \u0631\u0645\u0632\u0627\u064B \u062C\u062F\u064A\u062F\u0627\u064B" };
+    }
+    if (row.failedAttempts >= 5) {
+      return { ok: false, reason: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u062D\u062F \u0627\u0644\u0623\u0642\u0635\u0649 \u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0625\u062F\u062E\u0627\u0644 \u0627\u0644\u0631\u0645\u0632 (5 \u0645\u062D\u0627\u0648\u0644\u0627\u062A) \u2014 \u0627\u0637\u0644\u0628 \u0631\u0645\u0632\u0627\u064B \u062C\u062F\u064A\u062F\u0627\u064B" };
+    }
+    if (!verifySecret(code.trim(), row.codeHash)) {
+      this.db.prepare(`UPDATE recovery_tokens SET failed_attempts = failed_attempts + 1 WHERE id = ?`).run(row.id);
+      return { ok: false, reason: "\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" };
+    }
+    this.db.prepare(`UPDATE recovery_tokens SET used_at = ? WHERE id = ?`).run((/* @__PURE__ */ new Date()).toISOString(), row.id);
+    return { ok: true, record: row };
+  }
+  getDiagnostics() {
+    const entitiesCount = this.db.prepare(`SELECT COUNT(*) as c FROM entities`).get().c;
+    const operationsCount = this.db.prepare(`SELECT COUNT(*) as c FROM operations_log`).get().c;
+    const activeSessionsCount = this.db.prepare(`SELECT COUNT(*) as c FROM sessions WHERE revoked_at IS NULL AND expires_at > ?`).get((/* @__PURE__ */ new Date()).toISOString()).c;
+    const pragmaRow = this.db.prepare(`PRAGMA journal_mode`).get();
+    const journalMode = String(pragmaRow?.journal_mode || "wal").toLowerCase();
+    const dbSizeBytes = fs.existsSync(this.dbPath) ? fs.statSync(this.dbPath).size : 0;
+    return {
+      engine: "sqlite-wal",
+      journalMode,
+      dbPath: this.dbPath,
+      entitiesCount,
+      operationsCount,
+      activeSessionsCount,
+      dbSizeKb: Math.max(1, Math.round(dbSizeBytes / 1024))
+    };
+  }
+  close() {
+    try {
+      this.db.close();
+    } catch {
+    }
+  }
+};
+
+// src/utils/rbac.ts
+var RBAC_MODULES = [
+  { key: "dashboard", labelAr: "\u0644\u0648\u062D\u0629 \u0627\u0644\u062A\u062D\u0643\u0645", labelEn: "Dashboard", groupAr: "\u0627\u0644\u0639\u0645\u0644\u064A\u0627\u062A" },
+  { key: "properties", labelAr: "\u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A", labelEn: "Properties", groupAr: "\u0627\u0644\u0645\u062D\u0641\u0638\u0629" },
+  { key: "units", labelAr: "\u0627\u0644\u0648\u062D\u062F\u0627\u062A", labelEn: "Units", groupAr: "\u0627\u0644\u0645\u062D\u0641\u0638\u0629" },
+  { key: "tenants", labelAr: "\u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631\u0648\u0646 \u0648\u0627\u0644\u0645\u0647\u062A\u0645\u0648\u0646", labelEn: "Tenants & Leads", groupAr: "\u0627\u0644\u062A\u0623\u062C\u064A\u0631" },
+  { key: "contracts", labelAr: "\u0627\u0644\u0639\u0642\u0648\u062F \u0648\u0625\u064A\u062C\u0627\u0631", labelEn: "Contracts", groupAr: "\u0627\u0644\u062A\u0623\u062C\u064A\u0631" },
+  { key: "payments", labelAr: "\u0627\u0644\u062F\u0641\u0639\u0627\u062A \u0648\u0627\u0644\u062A\u062D\u0635\u064A\u0644", labelEn: "Payments", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "finance", labelAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u0648\u0627\u0644\u0645\u062D\u0627\u0633\u0628\u0629", labelEn: "Finance & Ledger", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "receipts", labelAr: "\u0627\u0644\u0625\u064A\u0635\u0627\u0644\u0627\u062A \u0648\u0627\u0644\u0633\u0646\u062F\u0627\u062A", labelEn: "Receipts", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "expenses", labelAr: "\u0627\u0644\u0645\u0635\u0631\u0648\u0641\u0627\u062A \u0648\u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0627\u062A", labelEn: "Expenses", groupAr: "\u0627\u0644\u0645\u0627\u0644\u064A\u0629" },
+  { key: "maintenance", labelAr: "\u0627\u0644\u0635\u064A\u0627\u0646\u0629 \u0648\u0627\u0644\u0628\u0644\u0627\u063A\u0627\u062A", labelEn: "Maintenance", groupAr: "\u0627\u0644\u062A\u0634\u063A\u064A\u0644" },
+  { key: "tasks", labelAr: "\u0627\u0644\u0645\u0647\u0627\u0645 \u0627\u0644\u064A\u0648\u0645\u064A\u0629", labelEn: "Tasks", groupAr: "\u0627\u0644\u062A\u0634\u063A\u064A\u0644" },
+  { key: "reports", labelAr: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u062A\u062D\u0644\u064A\u0644\u0627\u062A", labelEn: "Reports", groupAr: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631" },
+  { key: "documents", labelAr: "\u062E\u0632\u0646\u0629 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A", labelEn: "Documents", groupAr: "\u0627\u0644\u0623\u0631\u0634\u0641\u0629" },
+  { key: "archive", labelAr: "\u0627\u0644\u0623\u0631\u0634\u064A\u0641 \u0627\u0644\u0630\u0643\u064A", labelEn: "Smart Archive", groupAr: "\u0627\u0644\u0623\u0631\u0634\u0641\u0629" },
+  { key: "team", labelAr: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645\u0648\u0646 \u0648\u0641\u0631\u064A\u0642 \u0627\u0644\u0639\u0645\u0644", labelEn: "Team & Workforce", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" },
+  { key: "audit", labelAr: "\u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642", labelEn: "Audit Logs", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" },
+  { key: "settings", labelAr: "\u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A", labelEn: "Settings", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" },
+  { key: "backups", labelAr: "\u0627\u0644\u0646\u0633\u062E \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A", labelEn: "Backups", groupAr: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629" }
+];
+var ROLE_TEMPLATES = [
+  {
+    key: "sys_owner",
+    labelAr: "\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645",
+    labelEn: "System Owner",
+    tierAr: "\u062A\u062D\u0643\u0645 \u0643\u0627\u0645\u0644",
+    descAr: "\u0627\u0644\u062A\u062D\u0643\u0645 \u0627\u0644\u0643\u0627\u0645\u0644 \u0628\u0627\u0644\u0645\u0646\u0634\u0623\u0629\u060C \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u0648\u0627\u0644\u0623\u062F\u0648\u0627\u0631\u060C \u0627\u0644\u0623\u0645\u0627\u0646\u060C \u0648\u0627\u0644\u0646\u0633\u062E \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A",
+    defaultLimitSar: 9999999
+  },
+  {
+    key: "gm",
+    labelAr: "\u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629",
+    labelEn: "Company Manager",
+    tierAr: "\u0645\u0631\u062A\u0641\u0639",
+    descAr: "\u0627\u0644\u0625\u0634\u0631\u0627\u0641 \u0627\u0644\u0639\u0627\u0645\u060C \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0627\u0644\u0645\u0627\u0644\u064A\u0629\u060C \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u0645\u0635\u0631\u0648\u0641\u0627\u062A \u0627\u0644\u0643\u0628\u0631\u0649 \u0648\u0627\u0644\u0642\u0631\u0627\u0631\u0627\u062A",
+    defaultLimitSar: 5e5
+  },
+  {
+    key: "supervisor",
+    labelAr: "\u0627\u0644\u0645\u0634\u0631\u0641 \u0627\u0644\u0639\u0642\u0627\u0631\u064A",
+    labelEn: "Property Supervisor",
+    tierAr: "\u0645\u062A\u0648\u0633\u0637-\u0645\u0631\u062A\u0641\u0639",
+    descAr: "\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A \u0648\u0627\u0644\u0648\u062D\u062F\u0627\u062A\u060C \u0645\u062A\u0627\u0628\u0639\u0629 \u0627\u0644\u0625\u0634\u063A\u0627\u0644 \u0648\u0645\u062D\u0627\u0636\u0631 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0648\u0627\u0644\u0625\u062E\u0644\u0627\u0621",
+    defaultLimitSar: 25e3
+  },
+  {
+    key: "accountant",
+    labelAr: "\u0627\u0644\u0645\u062D\u0627\u0633\u0628",
+    labelEn: "Accountant",
+    tierAr: "\u0645\u0627\u0644\u064A \u0641\u0642\u0637",
+    descAr: "\u0627\u0644\u062A\u062D\u0635\u064A\u0644\u060C \u0633\u0646\u062F\u0627\u062A \u0627\u0644\u0642\u0628\u0636\u060C \u0627\u0644\u0645\u0635\u0631\u0648\u0641\u0627\u062A\u060C \u0627\u0644\u0642\u064A\u0648\u062F \u0627\u0644\u0645\u062D\u0627\u0633\u0628\u064A\u0629 \u0648\u062A\u0642\u0627\u0631\u064A\u0631 \u0627\u0644\u0645\u0644\u0627\u0643",
+    defaultLimitSar: 5e4
+  },
+  {
+    key: "leasing",
+    labelAr: "\u0645\u0648\u0638\u0641 \u0627\u0644\u062A\u0623\u062C\u064A\u0631",
+    labelEn: "Leasing Agent",
+    tierAr: "\u0645\u062A\u0648\u0633\u0637",
+    descAr: "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631\u064A\u0646\u060C \u0625\u0628\u0631\u0627\u0645 \u0627\u0644\u0639\u0642\u0648\u062F\u060C \u0627\u0644\u062A\u0648\u062B\u064A\u0642 \u0641\u064A \u0625\u064A\u062C\u0627\u0631 \u0648\u0645\u062A\u0627\u0628\u0639\u0629 \u0627\u0644\u0645\u062A\u0623\u062E\u0631\u0627\u062A",
+    defaultLimitSar: 0
+  },
+  {
+    key: "maint_manager",
+    labelAr: "\u0645\u0633\u0624\u0648\u0644 \u0627\u0644\u0635\u064A\u0627\u0646\u0629",
+    labelEn: "Maintenance Manager",
+    tierAr: "\u062A\u0634\u063A\u064A\u0644\u064A",
+    descAr: "\u0627\u0633\u062A\u0642\u0628\u0627\u0644 \u0628\u0644\u0627\u063A\u0627\u062A \u0627\u0644\u0635\u064A\u0627\u0646\u0629\u060C \u0625\u0633\u0646\u0627\u062F \u0627\u0644\u0645\u0647\u0627\u0645 \u0644\u0644\u0641\u0646\u064A\u064A\u0646\u060C \u0648\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0645\u0648\u0631\u062F\u064A\u0646",
+    defaultLimitSar: 15e3
+  },
+  {
+    key: "technician",
+    labelAr: "\u0641\u0646\u064A \u0627\u0644\u0635\u064A\u0627\u0646\u0629",
+    labelEn: "Technician",
+    tierAr: "\u0645\u062D\u062F\u0648\u062F",
+    descAr: "\u062A\u0646\u0641\u064A\u0630 \u0627\u0644\u0645\u0647\u0627\u0645 \u0627\u0644\u0645\u064A\u062F\u0627\u0646\u064A\u0629 \u0627\u0644\u0645\u0633\u0646\u062F\u0629 \u0648\u0631\u0641\u0639 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u062A\u0634\u062E\u064A\u0635 \u0648\u0627\u0644\u0635\u0648\u0631",
+    defaultLimitSar: 0
+  },
+  {
+    key: "receptionist",
+    labelAr: "\u0645\u0648\u0638\u0641 \u0627\u0644\u0627\u0633\u062A\u0642\u0628\u0627\u0644",
+    labelEn: "Receptionist",
+    tierAr: "\u0623\u0633\u0627\u0633\u064A",
+    descAr: "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0623\u0648\u0644\u064A\u0629 \u0644\u0644\u0639\u0645\u0644\u0627\u0621\u060C \u0631\u0641\u0639 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A\u060C \u0648\u062A\u0648\u062C\u064A\u0647 \u0627\u0644\u0628\u0644\u0627\u063A\u0627\u062A",
+    defaultLimitSar: 0
+  },
+  {
+    key: "auditor",
+    labelAr: "\u0627\u0644\u0645\u0631\u0627\u062C\u0639",
+    labelEn: "Auditor",
+    tierAr: "\u0644\u0644\u0642\u0631\u0627\u0621\u0629 \u0641\u0642\u0637",
+    descAr: "\u0627\u0644\u0627\u0637\u0644\u0627\u0639 \u0627\u0644\u0643\u0627\u0645\u0644 \u0639\u0644\u0649 \u0627\u0644\u0633\u062C\u0644\u0627\u062A \u0627\u0644\u0645\u0627\u0644\u064A\u0629 \u0648\u0627\u0644\u062A\u0634\u063A\u064A\u0644\u064A\u0629 \u0648\u0633\u062C\u0644 \u0627\u0644\u062A\u062F\u0642\u064A\u0642 \u062F\u0648\u0646 \u062A\u0639\u062F\u064A\u0644",
+    defaultLimitSar: 0
+  },
+  {
+    key: "owner",
+    labelAr: "\u0628\u0648\u0627\u0628\u0629 \u0627\u0644\u0645\u0627\u0644\u0643",
+    labelEn: "Owner Portal",
+    tierAr: "\u0645\u062D\u0641\u0638\u0629 \u0627\u0644\u0645\u0627\u0644\u0643",
+    descAr: "\u0645\u062A\u0627\u0628\u0639\u0629 \u0639\u0648\u0627\u0626\u062F \u0648\u0625\u0634\u063A\u0627\u0644 \u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A \u0627\u0644\u0645\u0645\u0644\u0648\u0643\u0629 \u0648\u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u0644\u062A\u0633\u0648\u064A\u0629 \u0641\u0642\u0637",
+    defaultLimitSar: 0
+  }
+];
+var ALL_ACTIONS = ["view", "create", "edit", "delete_void", "approve", "export", "manage"];
+function getDefaultModulePermissionsForRole(role) {
+  if (role === "sys_owner" || role === "gm") {
+    return Object.fromEntries(RBAC_MODULES.map((m) => [m.key, [...ALL_ACTIONS]]));
+  }
+  if (role === "auditor") {
+    return Object.fromEntries(
+      RBAC_MODULES.filter((m) => m.key !== "settings" && m.key !== "backups").map((m) => [
+        m.key,
+        ["view", "export"]
+      ])
+    );
+  }
+  if (role === "accountant") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      tenants: ["view"],
+      contracts: ["view"],
+      payments: ["view", "create", "edit", "approve", "export"],
+      finance: ["view", "create", "edit", "approve", "export", "manage"],
+      receipts: ["view", "create", "delete_void", "export"],
+      expenses: ["view", "create", "edit", "export"],
+      reports: ["view", "export"],
+      documents: ["view", "create", "export"],
+      archive: ["view", "export"],
+      audit: ["view"]
+    };
+  }
+  if (role === "supervisor") {
+    return {
+      dashboard: ["view"],
+      properties: ["view", "create", "edit", "export"],
+      units: ["view", "create", "edit", "export"],
+      tenants: ["view", "create", "edit"],
+      contracts: ["view", "create", "edit", "approve"],
+      maintenance: ["view", "create", "edit", "approve"],
+      tasks: ["view", "create", "edit", "approve"],
+      expenses: ["view", "create", "approve"],
+      reports: ["view", "export"],
+      documents: ["view", "create"],
+      archive: ["view", "create"]
+    };
+  }
+  if (role === "leasing") {
+    return {
+      dashboard: ["view"],
+      properties: ["view", "edit"],
+      units: ["view", "create", "edit"],
+      tenants: ["view", "create", "edit", "export"],
+      contracts: ["view", "create", "edit", "export"],
+      tasks: ["view", "create"],
+      documents: ["view", "create"],
+      archive: ["view"]
+    };
+  }
+  if (role === "maint_manager") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      maintenance: ["view", "create", "edit", "approve", "manage"],
+      tasks: ["view", "create", "edit", "approve", "manage"],
+      expenses: ["view", "create", "approve"],
+      documents: ["view", "create"],
+      reports: ["view"]
+    };
+  }
+  if (role === "technician") {
+    return {
+      dashboard: ["view"],
+      units: ["view"],
+      maintenance: ["view", "create", "edit"],
+      tasks: ["view", "create", "edit"],
+      expenses: ["view", "create"]
+    };
+  }
+  if (role === "receptionist") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      tenants: ["view", "create", "edit"],
+      tasks: ["view", "create"],
+      documents: ["view", "create"],
+      maintenance: ["view", "create"]
+    };
+  }
+  if (role === "owner") {
+    return {
+      dashboard: ["view"],
+      properties: ["view"],
+      units: ["view"],
+      tenants: ["view"],
+      contracts: ["view"],
+      payments: ["view"],
+      finance: ["view"],
+      receipts: ["view"],
+      reports: ["view", "export"],
+      documents: ["view"],
+      archive: ["view"]
+    };
+  }
+  return { dashboard: ["view"] };
+}
+function buildAllDefaultRoleModulePermissions() {
+  const out = {};
+  for (const r of ROLE_TEMPLATES) {
+    out[r.key] = getDefaultModulePermissionsForRole(r.key);
+  }
+  return out;
+}
+function mergeModulePermissions(base, overlay) {
+  if (!overlay) return { ...base };
+  const merged = {};
+  for (const m of RBAC_MODULES) {
+    const key = m.key;
+    if (overlay[key] !== void 0) {
+      merged[key] = Array.from(new Set(overlay[key] || []));
+    } else if (base[key] !== void 0) {
+      merged[key] = Array.from(new Set(base[key] || []));
+    }
+  }
+  return merged;
+}
+function deriveLegacyPermissionsFromModules(modulePerms) {
+  const set = /* @__PURE__ */ new Set();
+  const hasAny = (mod, actions) => {
+    const list = modulePerms[mod] || [];
+    return list.includes("manage") || actions.some((a) => list.includes(a));
+  };
+  if (hasAny("properties", ["create", "edit", "delete_void", "manage"]) || hasAny("units", ["create", "edit", "manage"])) {
+    set.add("manage_properties");
+  }
+  if (hasAny("tenants", ["create", "edit", "delete_void", "manage"])) {
+    set.add("manage_tenants");
+  }
+  if (hasAny("contracts", ["create", "edit", "approve", "manage"])) {
+    set.add("manage_contracts");
+  }
+  if (hasAny("payments", ["create", "edit", "manage"])) {
+    set.add("collect_payments");
+  }
+  if (hasAny("receipts", ["delete_void", "approve", "manage"])) {
+    set.add("reverse_receipts");
+  }
+  if (hasAny("finance", ["create", "edit", "approve", "manage"])) {
+    set.add("manage_accounting");
+  }
+  if (hasAny("expenses", ["create"])) {
+    set.add("create_expense");
+  }
+  if (hasAny("expenses", ["approve"])) {
+    set.add("approve_expense_supervisor");
+  }
+  if (hasAny("expenses", ["manage"])) {
+    set.add("approve_expense_manager");
+  }
+  if (hasAny("maintenance", ["manage", "approve"])) {
+    set.add("manage_maintenance");
+  }
+  if (hasAny("maintenance", ["create", "edit"])) {
+    set.add("execute_maintenance");
+  }
+  if (hasAny("tasks", ["create", "edit", "approve", "manage"])) {
+    set.add("manage_tasks");
+  }
+  if (hasAny("documents", ["create", "edit", "delete_void", "manage"])) {
+    set.add("manage_documents");
+  }
+  if (hasAny("team", ["create", "edit", "delete_void", "manage"]) || hasAny("settings", ["manage"])) {
+    set.add("manage_users");
+  }
+  if (hasAny("backups", ["create", "manage", "approve"])) {
+    set.add("backup_restore");
+  }
+  if (hasAny("audit", ["view", "export", "manage"])) {
+    set.add("view_audit");
+  }
+  if (hasAny("reports", ["view"]) && hasAny("finance", ["view"])) {
+    set.add("view_all");
+  }
+  return Array.from(set);
+}
+function getEffectiveModulePermissions(state, user) {
+  if (!user) return {};
+  const customRole = user.customRoleId ? state?.customRoles?.find((r) => r.id === user.customRoleId) : void 0;
+  const baseTemplate = customRole ? customRole.modulePermissions : state?.roleModulePermissions?.[user.role] || getDefaultModulePermissionsForRole(user.role);
+  const effective = mergeModulePermissions(baseTemplate, user.customModulePermissions);
+  const legacyList = customRole ? customRole.legacyPermissions : state?.rolePermissions?.[user.role] || [];
+  const ensureLegacy = (perm, mod, actions) => {
+    if (!legacyList.includes(perm)) return;
+    if (user.customModulePermissions && user.customModulePermissions[mod] !== void 0) return;
+    const cur = new Set(effective[mod] || []);
+    for (const a of actions) cur.add(a);
+    effective[mod] = Array.from(cur);
+  };
+  ensureLegacy("manage_properties", "properties", ["view", "create", "edit"]);
+  ensureLegacy("manage_properties", "units", ["view", "create", "edit"]);
+  ensureLegacy("manage_tenants", "tenants", ["view", "create", "edit"]);
+  ensureLegacy("manage_contracts", "contracts", ["view", "create", "edit"]);
+  ensureLegacy("collect_payments", "payments", ["view", "create"]);
+  ensureLegacy("collect_payments", "receipts", ["view", "create"]);
+  ensureLegacy("reverse_receipts", "receipts", ["view", "delete_void"]);
+  ensureLegacy("manage_accounting", "finance", ["view", "create", "edit"]);
+  ensureLegacy("create_expense", "expenses", ["view", "create"]);
+  ensureLegacy("approve_expense_supervisor", "expenses", ["view", "approve"]);
+  ensureLegacy("approve_expense_manager", "expenses", ["view", "approve", "manage"]);
+  ensureLegacy("manage_maintenance", "maintenance", ["view", "create", "edit", "approve", "manage"]);
+  ensureLegacy("execute_maintenance", "maintenance", ["view", "edit"]);
+  ensureLegacy("manage_tasks", "tasks", ["view", "create", "edit"]);
+  ensureLegacy("manage_documents", "documents", ["view", "create", "edit"]);
+  ensureLegacy("manage_users", "team", ["view", "create", "edit", "delete_void", "manage"]);
+  ensureLegacy("backup_restore", "backups", ["view", "create", "approve", "manage"]);
+  ensureLegacy("view_audit", "audit", ["view", "export"]);
+  return effective;
+}
+function userHasModuleAction(state, user, module, action = "view") {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") return false;
+  if (user.role === "sys_owner" && !user.customModulePermissions && !user.customRoleId) {
+    return true;
+  }
+  const effective = getEffectiveModulePermissions(state, user);
+  const actions = effective[module] || [];
+  if (actions.includes("manage")) return true;
+  return actions.includes(action);
+}
+function userHasLegacyPermission(state, user, permission) {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") return false;
+  if (user.customRoleId) {
+    const customRole = state?.customRoles?.find((r) => r.id === user.customRoleId);
+    if (customRole) {
+      const derived = deriveLegacyPermissionsFromModules(
+        getEffectiveModulePermissions(state, user)
+      );
+      return customRole.legacyPermissions.includes(permission) || derived.includes(permission);
+    }
+  }
+  if (user.customModulePermissions) {
+    const derived = deriveLegacyPermissionsFromModules(
+      getEffectiveModulePermissions(state, user)
+    );
+    if (derived.includes(permission)) return true;
+  }
+  const perms = state?.rolePermissions?.[user.role] || [];
+  return perms.includes(permission);
+}
+function getNavRequiredModules(nav) {
+  switch (nav) {
+    case "dashboard":
+      return ["dashboard"];
+    case "daily_hub":
+      return ["tasks", "dashboard"];
+    case "properties":
+      return ["properties", "units"];
+    case "leasing_finance":
+    case "leasing":
+    case "finance":
+    case "accounting":
+      return ["contracts", "payments", "finance", "receipts", "expenses"];
+    case "tenants":
+      return ["tenants"];
+    case "maintenance":
+      return ["maintenance", "tasks"];
+    case "reports":
+    case "admin":
+      return ["reports", "audit"];
+    case "team":
+      return ["team"];
+    case "documents":
+      return ["documents"];
+    case "archive":
+      return ["archive"];
+    case "templates":
+      return ["tenants", "contracts", "settings"];
+    case "settings":
+      return ["settings", "backups"];
+    case "about":
+    case "profile":
+      return ["dashboard"];
+    default:
+      return ["dashboard"];
+  }
+}
+function userCanAccessNav(state, user, nav) {
+  if (!user || !user.active) return false;
+  if (user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") return false;
+  if (nav === "profile" || nav === "about" || nav === "dashboard") return true;
+  if (user.role === "owner") {
+    const ownerAllowed = /* @__PURE__ */ new Set(["dashboard", "properties", "leasing_finance", "tenants", "reports", "documents", "archive", "profile", "about"]);
+    return ownerAllowed.has(nav);
+  }
+  const modules = getNavRequiredModules(nav);
+  return modules.some((m) => userHasModuleAction(state, user, m, "view"));
+}
+function getRecommendedLandingNav(state, user) {
+  if (!user || !user.active || user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") {
+    return { nav: "dashboard" };
+  }
+  if (user.role === "accountant" && userCanAccessNav(state, user, "leasing_finance")) {
+    return { nav: "leasing_finance", leasingFinanceTab: "finance" };
+  }
+  if ((user.role === "maint_manager" || user.role === "technician") && userCanAccessNav(state, user, "maintenance")) {
+    return { nav: "maintenance" };
+  }
+  if (user.role === "leasing" && userCanAccessNav(state, user, "tenants")) {
+    return { nav: "tenants" };
+  }
+  if (user.role === "supervisor" && userCanAccessNav(state, user, "properties")) {
+    return { nav: "properties" };
+  }
+  if (user.role === "receptionist" && userCanAccessNav(state, user, "daily_hub")) {
+    return { nav: "daily_hub" };
+  }
+  return { nav: "dashboard" };
+}
+function getAllowedNavsForUser(state, user) {
+  const allNavs = [
+    "dashboard",
+    "daily_hub",
+    "properties",
+    "leasing_finance",
+    "tenants",
+    "maintenance",
+    "reports",
+    "team",
+    "documents",
+    "archive",
+    "templates",
+    "settings",
+    "profile",
+    "about"
+  ];
+  return allNavs.filter((n) => userCanAccessNav(state, user, n));
+}
+
 // server/store.ts
+var PermissionDeniedError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.statusCode = 403;
+    this.name = "PermissionDeniedError";
+  }
+};
 var RATES_TO_SAR = {
   SAR: 1,
   AED: 1.021,
@@ -2982,16 +4195,26 @@ function currencyLabelAr(currency = "SAR") {
       return "\u0631.\u0633";
   }
 }
-var DATA_DIR = process.env.AQARPLUS_USER_DATA_DIR ? path.resolve(process.env.AQARPLUS_USER_DATA_DIR) : path.resolve(process.cwd(), "data");
-var DB_FILE = path.join(DATA_DIR, "aqarplus-db.json");
-var BACKUP_DIR = path.join(DATA_DIR, "backups");
-var ARCHIVE_DIR = path.join(DATA_DIR, "archive");
-var DOCUMENTS_DIR = path.join(DATA_DIR, "documents");
-function ensureDirs() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  if (!fs.existsSync(ARCHIVE_DIR)) fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
-  if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
+function getBaseDataDir() {
+  return process.env.AQARPLUS_USER_DATA_DIR ? path2.resolve(process.env.AQARPLUS_USER_DATA_DIR) : path2.resolve(process.cwd(), "data");
+}
+function getWorkspacePaths(workspaceId = "default") {
+  const base = getBaseDataDir();
+  const dataDir = workspaceId === "default" ? base : path2.join(base, "workspaces", workspaceId);
+  return {
+    dataDir,
+    dbFile: path2.join(dataDir, "aqarplus.sqlite"),
+    jsonFile: path2.join(dataDir, "aqarplus-db.json"),
+    backupDir: path2.join(dataDir, "backups"),
+    archiveDir: path2.join(dataDir, "archive"),
+    documentsDir: path2.join(dataDir, "documents")
+  };
+}
+function ensureWorkspaceDirs(paths) {
+  if (!fs2.existsSync(paths.dataDir)) fs2.mkdirSync(paths.dataDir, { recursive: true });
+  if (!fs2.existsSync(paths.backupDir)) fs2.mkdirSync(paths.backupDir, { recursive: true });
+  if (!fs2.existsSync(paths.archiveDir)) fs2.mkdirSync(paths.archiveDir, { recursive: true });
+  if (!fs2.existsSync(paths.documentsDir)) fs2.mkdirSync(paths.documentsDir, { recursive: true });
 }
 function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -3003,15 +4226,247 @@ function pad3(n) {
   return String(n).padStart(3, "0");
 }
 var AqarStore = class {
-  constructor() {
+  constructor(workspaceId = "default", provision) {
     this.propIndex = /* @__PURE__ */ new Map();
     this.unitIndex = /* @__PURE__ */ new Map();
     this.tenantIndex = /* @__PURE__ */ new Map();
     this.contractIndex = /* @__PURE__ */ new Map();
     this.idempotencyIndex = /* @__PURE__ */ new Set();
-    ensureDirs();
-    this.state = this.loadFromDisk();
+    this.workspaceId = workspaceId || "default";
+    this.paths = getWorkspacePaths(this.workspaceId);
+    ensureWorkspaceDirs(this.paths);
+    this.sqlite = new SqlitePersistence(this.paths.dataDir);
+    if (provision) {
+      this.state = this.initializeProvisionedWorkspace(provision);
+    } else {
+      this.state = this.loadInitialState();
+      this.sqlite.ensureSeedCredentials(
+        this.state.users.filter((u) => u.accountStatus !== "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644")
+      );
+    }
     this.rebuildIndexes();
+  }
+  static workspaceExists(workspaceId) {
+    if (workspaceId === "default") return true;
+    const paths = getWorkspacePaths(workspaceId);
+    return fs2.existsSync(paths.dbFile);
+  }
+  getPersistence() {
+    return this.sqlite;
+  }
+  getSessionSecret() {
+    return this.sqlite.getOrCreateSessionSecret();
+  }
+  normalizePhoneKey(raw) {
+    const digits = (raw || "").replace(/[^\d]/g, "");
+    if (digits.length >= 9) {
+      return digits.slice(-9);
+    }
+    return digits;
+  }
+  findUserByLoginIdentifier(identifier) {
+    const raw = (identifier || "").trim();
+    const norm = raw.toLowerCase();
+    if (!norm) return void 0;
+    const phoneKey = this.normalizePhoneKey(raw);
+    return this.state.users.find(
+      (u) => u.id.toLowerCase() === norm || u.email.toLowerCase() === norm || u.username && u.username.toLowerCase() === norm || u.phone === raw || phoneKey.length >= 9 && this.normalizePhoneKey(u.phone) === phoneKey
+    );
+  }
+  assertAccountLoginAllowed(user) {
+    const status = user.accountStatus || (user.active ? "\u0646\u0634\u0637" : "\u0645\u0648\u0642\u0648\u0641");
+    if (status === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644") {
+      throw new Error("\u062D\u0633\u0627\u0628\u0643 \u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644 \u2014 \u064A\u0631\u062C\u0649 \u0641\u062A\u062D \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0625\u0643\u0645\u0627\u0644 \u0625\u0639\u062F\u0627\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0623\u0648\u0644\u0627\u064B");
+    }
+    if (status === "\u0645\u0631\u0641\u0648\u0636") {
+      throw new Error("\u062A\u0645 \u0631\u0641\u0636 \u0637\u0644\u0628 \u062A\u0641\u0639\u064A\u0644 \u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0646 \u0642\u0650\u0628\u0644 \u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    }
+    if (status === "\u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0648\u0635\u0648\u0644") {
+      throw new Error("\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u0648\u0635\u0648\u0644 \u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0625\u0644\u0649 \u0627\u0644\u0634\u0631\u0643\u0629");
+    }
+    if (!user.active || status === "\u0645\u0648\u0642\u0648\u0641") {
+      throw new Error("\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0646 \u0642\u0650\u0628\u0644 \u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+    }
+  }
+  getLoginProfiles() {
+    return this.state.users.filter((u) => u.active && (!u.accountStatus || u.accountStatus === "\u0646\u0634\u0637")).map((u) => ({
+      id: u.id,
+      nameAr: u.nameAr,
+      nameEn: u.nameEn,
+      email: u.email,
+      role: u.role,
+      roleLabelAr: u.roleLabelAr,
+      roleLabelEn: u.roleLabelEn,
+      hasPin: u.security?.pinEnabled !== false && this.sqlite.getCredentialStatus(u.id).hasPin
+    }));
+  }
+  hasUserWithIdentifier(identifier) {
+    return this.findUserByLoginIdentifier(identifier);
+  }
+  authenticatePasswordDetailed(identifier, password, deviceName) {
+    const user = this.findUserByLoginIdentifier(identifier);
+    if (!user) {
+      throw new Error("\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629");
+    }
+    this.assertAccountLoginAllowed(user);
+    if (user.security?.lockedUntil && new Date(user.security.lockedUntil).getTime() > Date.now()) {
+      const waitSec = Math.ceil((new Date(user.security.lockedUntil).getTime() - Date.now()) / 1e3);
+      throw new Error(`\u062A\u0645 \u0642\u0641\u0644 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0624\u0642\u062A\u0627\u064B \u0644\u0643\u062B\u0631\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062E\u0627\u0637\u0626\u0629. \u062D\u0627\u0648\u0644 \u0628\u0639\u062F ${waitSec} \u062B\u0627\u0646\u064A\u0629.`);
+    }
+    if (!this.sqlite.verifyUserPassword(user.id, password)) {
+      if (!user.security) user.security = {};
+      user.security.failedAttempts = (user.security.failedAttempts || 0) + 1;
+      if (user.security.failedAttempts >= 5) {
+        user.security.lockedUntil = new Date(Date.now() + 5 * 60 * 1e3).toISOString();
+      }
+      this.recordLoginEvent({
+        userId: user.id,
+        deviceName: deviceName || user.deviceName,
+        method: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+        success: false
+      });
+      this.persist();
+      throw new Error("\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629");
+    }
+    const hadSuspiciousFailures = (user.security?.failedAttempts || 0) >= 3;
+    if (user.security) {
+      user.security.failedAttempts = 0;
+      user.security.lockedUntil = void 0;
+      user.security.pinFailedAttempts = 0;
+      user.security.pinLockedUntil = void 0;
+      user.security.requirePasswordAfterPinLock = false;
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    user.statusState = "\u0645\u062A\u0635\u0644";
+    user.lastLoginAt = now;
+    user.lastActiveAt = now;
+    this.recordLoginEvent({
+      userId: user.id,
+      deviceName: deviceName || user.deviceName,
+      method: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
+      success: true
+    });
+    this.persist();
+    return { user, hadSuspiciousFailures };
+  }
+  authenticatePassword(identifier, password, deviceName) {
+    return this.authenticatePasswordDetailed(identifier, password, deviceName).user;
+  }
+  authenticatePin(userIdOrIdentifier, pin, deviceName) {
+    const user = this.findUserByLoginIdentifier(userIdOrIdentifier);
+    if (!user) {
+      throw new Error("\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0623\u0648 \u0631\u0645\u0632 PIN \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629");
+    }
+    this.assertAccountLoginAllowed(user);
+    if (user.security?.pinEnabled === false || !this.sqlite.getCredentialStatus(user.id).hasPin) {
+      throw new Error("\u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0631\u0645\u0632 PIN \u0645\u0639\u0637\u0651\u0644 \u0644\u0647\u0630\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 \u2014 \u0627\u0633\u062A\u062E\u062F\u0645 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631");
+    }
+    if (user.security?.requirePasswordAfterPinLock) {
+      throw new Error("\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0631\u0645\u0632 PIN \u0645\u0624\u0642\u062A\u0627\u064B \u0644\u0643\u062B\u0631\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062E\u0627\u0637\u0626\u0629 \u2014 \u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0623\u0648\u0644\u0627\u064B");
+    }
+    if (user.security?.lockedUntil && new Date(user.security.lockedUntil).getTime() > Date.now()) {
+      const waitSec = Math.ceil((new Date(user.security.lockedUntil).getTime() - Date.now()) / 1e3);
+      throw new Error(`\u062A\u0645 \u0642\u0641\u0644 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0624\u0642\u062A\u0627\u064B \u0644\u0643\u062B\u0631\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062E\u0627\u0637\u0626\u0629. \u062D\u0627\u0648\u0644 \u0628\u0639\u062F ${waitSec} \u062B\u0627\u0646\u064A\u0629.`);
+    }
+    if (user.security?.pinLockedUntil && new Date(user.security.pinLockedUntil).getTime() > Date.now()) {
+      const waitSec = Math.ceil((new Date(user.security.pinLockedUntil).getTime() - Date.now()) / 1e3);
+      throw new Error(`\u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 ${waitSec} \u062B\u0627\u0646\u064A\u0629 \u0642\u0628\u0644 \u0625\u0639\u0627\u062F\u0629 \u0625\u062F\u062E\u0627\u0644 \u0631\u0645\u0632 PIN.`);
+    }
+    if (!/^\d{4,6}$/.test(pin) || !this.sqlite.verifyUserPin(user.id, pin)) {
+      if (!user.security) user.security = {};
+      user.security.pinFailedAttempts = (user.security.pinFailedAttempts || 0) + 1;
+      const fails = user.security.pinFailedAttempts;
+      if (fails >= 5) {
+        user.security.pinLockedUntil = new Date(Date.now() + 10 * 60 * 1e3).toISOString();
+        user.security.requirePasswordAfterPinLock = true;
+      } else if (fails === 4) {
+        user.security.pinLockedUntil = new Date(Date.now() + 120 * 1e3).toISOString();
+      } else if (fails === 3) {
+        user.security.pinLockedUntil = new Date(Date.now() + 30 * 1e3).toISOString();
+      }
+      this.recordLoginEvent({
+        userId: user.id,
+        deviceName: deviceName || user.deviceName,
+        method: "\u0628\u0635\u0645\u0629 / Face ID",
+        success: false
+      });
+      this.persist();
+      if (fails >= 5) {
+        throw new Error("\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0645\u062D\u0627\u0648\u0644\u0627\u062A PIN \u0627\u0644\u0645\u0633\u0645\u0648\u062D\u0629 \u2014 \u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0644\u0644\u0645\u062A\u0627\u0628\u0639\u0629");
+      }
+      throw new Error("\u0631\u0645\u0632 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 (PIN) \u063A\u064A\u0631 \u0635\u062D\u064A\u062D");
+    }
+    if (user.security) {
+      user.security.failedAttempts = 0;
+      user.security.lockedUntil = void 0;
+      user.security.pinFailedAttempts = 0;
+      user.security.pinLockedUntil = void 0;
+      user.security.requirePasswordAfterPinLock = false;
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    user.statusState = "\u0645\u062A\u0635\u0644";
+    user.lastLoginAt = now;
+    user.lastActiveAt = now;
+    this.recordLoginEvent({
+      userId: user.id,
+      deviceName: deviceName || user.deviceName,
+      method: "\u0628\u0635\u0645\u0629 / Face ID",
+      success: true
+    });
+    this.persist();
+    return user;
+  }
+  updateUserCredentials(actorUserId, targetUserId, input, deviceName) {
+    const actor = this.getActingUser(actorUserId);
+    const isSelf = actor.id === targetUserId;
+    if (!isSelf && actor.role !== "sys_owner") {
+      throw new PermissionDeniedError("\u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u062F\u062E\u0648\u0644 \u0645\u0648\u0638\u0641 \u0622\u062E\u0631 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+    }
+    if (isSelf && input.newPassword) {
+      if (!input.currentPassword || !this.sqlite.verifyUserPassword(actor.id, input.currentPassword)) {
+        throw new Error("\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629");
+      }
+    }
+    if (isSelf && input.newPin && input.currentPin !== void 0) {
+      if (!this.sqlite.verifyUserPin(actor.id, input.currentPin)) {
+        throw new Error("\u0631\u0645\u0632 PIN \u0627\u0644\u062D\u0627\u0644\u064A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D");
+      }
+    }
+    if (input.newPassword && input.newPassword.length < 8) {
+      throw new Error("\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u064A\u062C\u0628 \u0623\u0646 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641");
+    }
+    if (input.newPin && !/^\d{4,6}$/.test(input.newPin)) {
+      throw new Error("\u0631\u0645\u0632 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 (PIN) \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0643\u0648\u0646 \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645");
+    }
+    this.sqlite.updateUserCredentials(targetUserId, {
+      password: input.newPassword,
+      pin: input.newPin
+    });
+    const target = this.state.users.find((u) => u.id === targetUserId);
+    if (target) {
+      target.security = {
+        ...target.security || {},
+        hasPin: input.newPin ? true : target.security?.hasPin,
+        lastPasswordChangedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        tempPasswordSet: !isSelf
+      };
+    }
+    this.addAudit(
+      actor,
+      "\u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0623\u0645\u0627\u0646 \u0648\u0627\u0644\u062F\u062E\u0648\u0644",
+      "StaffUser",
+      targetUserId,
+      isSelf ? "\u062A\u062D\u062F\u064A\u062B \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 / \u0631\u0645\u0632 PIN \u0627\u0644\u0634\u062E\u0635\u064A" : `\u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0644\u0644\u0645\u0648\u0638\u0641 ${target?.nameAr || targetUserId}`,
+      { deviceName }
+    );
+    this.persist();
+    return { revokedOtherSessions: 0 };
+  }
+  bumpEntityRevision(entityKey) {
+    if (!this.state.entityRevisions) this.state.entityRevisions = {};
+    const next = (this.state.entityRevisions[entityKey] || 1) + 1;
+    this.state.entityRevisions[entityKey] = next;
+    return next;
   }
   rebuildIndexes() {
     this.propIndex = new Map(this.state.properties.map((p) => [p.id, p]));
@@ -3032,145 +4487,296 @@ var AqarStore = class {
       throw err;
     }
   }
-  loadFromDisk() {
+  normalizeParsedState(parsed, seed) {
+    const mergeMissingById = (existing = [], seedItems = []) => {
+      const seen = new Set(existing.map((x) => x.id));
+      return [...existing, ...seedItems.filter((item) => !seen.has(item.id))];
+    };
+    const parsedUsers = Array.isArray(parsed.users) ? parsed.users : seed.users;
+    const parsedProperties = Array.isArray(parsed.properties) ? parsed.properties : seed.properties;
+    const shouldSeedArchive = !parsed.archiveSeeded && parsedProperties.length > 0;
+    const shouldSeedTeam = !parsed.teamSeeded && parsedUsers.length > 0;
+    const mergedUsers = shouldSeedTeam ? [
+      ...parsedUsers.map((u) => {
+        const seedMatch = seed.users.find((su) => su.id === u.id);
+        return {
+          ...seedMatch,
+          ...u,
+          statusState: u.statusState || seedMatch?.statusState || "\u0645\u062A\u0635\u0644",
+          specialty: u.specialty || seedMatch?.specialty,
+          managerRating: u.managerRating ?? seedMatch?.managerRating ?? 4.8,
+          lastActivitySummary: u.lastActivitySummary || seedMatch?.lastActivitySummary,
+          security: u.security || seedMatch?.security,
+          notificationPrefs: u.notificationPrefs || seedMatch?.notificationPrefs
+        };
+      }),
+      ...seed.users.filter((su) => !parsedUsers.some((pu) => pu.id === su.id))
+    ] : parsedUsers;
+    const defaultCompanyId = this.getWorkspaceCompanyId(parsed.companies || seed.companies);
+    const normalizedUsers = mergedUsers.map((u) => ({
+      ...u,
+      companyId: u.companyId || defaultCompanyId,
+      username: u.username || (u.email ? u.email.split("@")[0].toLowerCase() : u.id),
+      accountStatus: u.accountStatus || (u.active ? "\u0646\u0634\u0637" : "\u0645\u0648\u0642\u0648\u0641"),
+      createdAt: u.createdAt || u.lastActiveAt,
+      joinedAt: u.joinedAt || (u.active ? u.createdAt || u.lastActiveAt : void 0)
+    }));
+    const mergedRolePermissions = {
+      ...DEFAULT_ROLE_PERMISSIONS,
+      ...parsed.rolePermissions || {}
+    };
+    const mergedRoleModulePermissions = {
+      ...buildAllDefaultRoleModulePermissions(),
+      ...parsed.roleModulePermissions || {}
+    };
+    return {
+      ...seed,
+      ...parsed,
+      users: normalizedUsers,
+      employeeInvitations: Array.isArray(parsed.employeeInvitations) ? parsed.employeeInvitations : [],
+      customRoles: Array.isArray(parsed.customRoles) ? parsed.customRoles : [],
+      rolePermissions: mergedRolePermissions,
+      roleModulePermissions: mergedRoleModulePermissions,
+      properties: parsedProperties,
+      units: shouldSeedArchive ? mergeMissingById(parsed.units || [], seed.units) : parsed.units || seed.units,
+      payments: shouldSeedArchive ? mergeMissingById(parsed.payments || [], seed.payments) : parsed.payments || seed.payments,
+      tickets: shouldSeedArchive ? mergeMissingById(parsed.tickets || [], seed.tickets) : parsed.tickets || seed.tickets,
+      tasks: shouldSeedArchive ? mergeMissingById(parsed.tasks || [], seed.tasks) : parsed.tasks || seed.tasks,
+      documents: shouldSeedArchive ? mergeMissingById(parsed.documents || [], seed.documents) : parsed.documents || seed.documents,
+      savedArchiveFilters: Array.isArray(parsed.savedArchiveFilters) && parsed.savedArchiveFilters.length > 0 ? parsed.savedArchiveFilters : shouldSeedArchive ? seed.savedArchiveFilters : [],
+      archiveLastNightlyRun: parsed.archiveLastNightlyRun || seed.archiveLastNightlyRun,
+      archiveSeeded: parsed.archiveSeeded ?? true,
+      securityPolicy: parsed.securityPolicy || seed.securityPolicy,
+      loginHistory: this.workspaceId !== "default" ? Array.isArray(parsed.loginHistory) ? parsed.loginHistory : [] : Array.isArray(parsed.loginHistory) && parsed.loginHistory.length > 0 ? parsed.loginHistory : seed.loginHistory,
+      syncConflicts: this.workspaceId !== "default" ? Array.isArray(parsed.syncConflicts) ? parsed.syncConflicts : [] : Array.isArray(parsed.syncConflicts) && parsed.syncConflicts.length > 0 ? parsed.syncConflicts : seed.syncConflicts,
+      teamSeeded: parsed.teamSeeded ?? true,
+      settings: {
+        ...seed.settings,
+        ...parsed.settings || {},
+        currencyRatesToSar: {
+          ...seed.settings.currencyRatesToSar,
+          ...parsed.settings?.currencyRatesToSar || {}
+        },
+        bankAccounts: Array.isArray(parsed.settings?.bankAccounts) && parsed.settings.bankAccounts.length > 0 ? parsed.settings.bankAccounts : seed.settings.bankAccounts,
+        receiptBranding: {
+          ...seed.settings.receiptBranding,
+          ...parsed.settings?.receiptBranding || {}
+        },
+        generalPrefs: {
+          ...seed.settings.generalPrefs,
+          ...parsed.settings?.generalPrefs || {}
+        },
+        securityCenter: {
+          ...seed.settings.securityCenter,
+          ...parsed.settings?.securityCenter || {}
+        },
+        notificationsCenter: {
+          ...seed.settings.notificationsCenter,
+          ...parsed.settings?.notificationsCenter || {}
+        },
+        printShare: {
+          ...seed.settings.printShare,
+          ...parsed.settings?.printShare || {}
+        },
+        backupPolicy: {
+          ...seed.settings.backupPolicy,
+          ...parsed.settings?.backupPolicy || {}
+        },
+        syncCenter: {
+          ...seed.settings.syncCenter,
+          ...parsed.settings?.syncCenter || {}
+        },
+        developerCenter: {
+          ...seed.settings.developerCenter,
+          ...parsed.settings?.developerCenter || {}
+        }
+      },
+      companies: Array.isArray(parsed.companies) && parsed.companies.length > 0 ? parsed.companies : seed.companies,
+      vendors: (parsed.vendors || seed.vendors).map((v) => {
+        const seedV = seed.vendors.find((sv) => sv.id === v.id);
+        return { ...seedV, ...v };
+      }),
+      tenants: (shouldSeedArchive ? mergeMissingById(parsed.tenants || [], seed.tenants) : parsed.tenants || seed.tenants).map((t) => {
+        const seedT = seed.tenants.find((st) => st.id === t.id);
+        return { ...seedT, ...t };
+      }),
+      contracts: (shouldSeedArchive ? mergeMissingById(parsed.contracts || [], seed.contracts) : parsed.contracts || seed.contracts).map((c) => {
+        const seedC = seed.contracts.find((sc) => sc.id === c.id);
+        return { ...seedC, ...c };
+      }),
+      leads: (parsed.leads || seed.leads).map((l) => {
+        const seedL = seed.leads.find((sl) => sl.id === l.id);
+        return { ...seedL, ...l };
+      }),
+      leadEscalations: Array.isArray(parsed.leadEscalations) && parsed.leadEscalations.length > 0 ? parsed.leadEscalations : seed.leadEscalations,
+      supplierInvoices: Array.isArray(parsed.supplierInvoices) && parsed.supplierInvoices.length > 0 ? parsed.supplierInvoices : seed.supplierInvoices,
+      recurringExpenses: Array.isArray(parsed.recurringExpenses) && parsed.recurringExpenses.length > 0 ? parsed.recurringExpenses : seed.recurringExpenses,
+      propertyBudgets: Array.isArray(parsed.propertyBudgets) && parsed.propertyBudgets.length > 0 ? parsed.propertyBudgets : seed.propertyBudgets,
+      purchaseOrders: Array.isArray(parsed.purchaseOrders) ? parsed.purchaseOrders : seed.purchaseOrders,
+      decisions: Array.isArray(parsed.decisions) ? parsed.decisions : seed.decisions,
+      reminderRules: Array.isArray(parsed.reminderRules) ? parsed.reminderRules : seed.reminderRules,
+      reminderLogs: Array.isArray(parsed.reminderLogs) ? parsed.reminderLogs : seed.reminderLogs,
+      communicationTemplates: Array.isArray(parsed.communicationTemplates) && parsed.communicationTemplates.length > 0 ? parsed.communicationTemplates : seed.communicationTemplates,
+      meterReadings: this.workspaceId !== "default" ? Array.isArray(parsed.meterReadings) ? parsed.meterReadings : [] : Array.isArray(parsed.meterReadings) && parsed.meterReadings.length > 0 ? parsed.meterReadings : seed.meterReadings,
+      scheduledReports: Array.isArray(parsed.scheduledReports) ? parsed.scheduledReports : [],
+      favoriteReports: Array.isArray(parsed.favoriteReports) ? parsed.favoriteReports : [],
+      sharedSearchFilters: Array.isArray(parsed.sharedSearchFilters) ? parsed.sharedSearchFilters : [],
+      zatcaInvoices: Array.isArray(parsed.zatcaInvoices) ? parsed.zatcaInvoices : [],
+      syncRevision: typeof parsed.syncRevision === "number" ? parsed.syncRevision : 1,
+      entityRevisions: parsed.entityRevisions || {}
+    };
+  }
+  initializeProvisionedWorkspace(input) {
+    const existing = this.sqlite.loadState();
+    if (existing && Array.isArray(existing.users) && existing.users.length > 0) {
+      throw new Error("\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u0647\u0630\u0647 \u0645\u0641\u0639\u0651\u0644\u0629 \u0645\u0633\u0628\u0642\u0627\u064B \u2014 \u0627\u062E\u062A\u0631 \u0645\u0639\u0631\u0651\u0641 \u0634\u0631\u0643\u0629 \u0645\u062E\u062A\u0644\u0641\u0627\u064B \u0623\u0648 \u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644");
+    }
+    const base = createInitialSeed();
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const companyEn = (input.companyNameEn || input.companyNameAr || "AqarPlus Workspace").trim();
+    const adminId = `usr-${this.workspaceId}-owner`;
+    const adminUser = {
+      id: adminId,
+      companyId: `comp-${this.workspaceId}`,
+      nameAr: input.adminNameAr.trim(),
+      nameEn: input.adminNameAr.trim(),
+      username: input.adminEmail.trim().toLowerCase().split("@")[0],
+      jobTitle: "\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0648\u0627\u0644\u0645\u062F\u064A\u0631 \u0627\u0644\u0639\u0627\u0645",
+      department: "\u0627\u0644\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0639\u0644\u064A\u0627",
+      email: input.adminEmail.trim().toLowerCase(),
+      phone: (input.adminPhone || "").trim(),
+      role: "sys_owner",
+      roleLabelAr: "\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645",
+      roleLabelEn: "System Owner",
+      approvalLimitSar: 1e7,
+      deviceName: input.deviceName || "Web Terminal",
+      lastActiveAt: now,
+      lastLoginAt: now,
+      joinedAt: now,
+      createdAt: now,
+      statusState: "\u0645\u062A\u0635\u0644",
+      active: true,
+      accountStatus: "\u0646\u0634\u0637",
+      security: {
+        hasPin: Boolean(input.pin),
+        lastPasswordChangedAt: now
+      }
+    };
+    const fresh = {
+      ...base,
+      settings: {
+        ...base.settings,
+        nameAr: input.companyNameAr.trim(),
+        nameEn: companyEn,
+        email: adminUser.email,
+        phone: adminUser.phone
+      },
+      companies: [
+        {
+          id: `comp-${this.workspaceId}`,
+          nameAr: input.companyNameAr.trim(),
+          nameEn: companyEn,
+          city: base.settings.city,
+          vatNumber: "",
+          crNumber: "",
+          address: base.settings.address || "",
+          phone: adminUser.phone,
+          email: adminUser.email,
+          bankName: base.settings.bankAccounts?.[0]?.bankName || "",
+          iban: base.settings.bankAccounts?.[0]?.iban || "",
+          receiptFooterAr: "",
+          isDefault: true
+        }
+      ],
+      users: [adminUser],
+      properties: [],
+      units: [],
+      meterReadings: [],
+      owners: [],
+      vendors: [],
+      tenants: [],
+      leads: [],
+      leadEscalations: [],
+      contracts: [],
+      handovers: [],
+      installments: [],
+      payments: [],
+      journals: [],
+      expenses: [],
+      supplierInvoices: [],
+      recurringExpenses: [],
+      propertyBudgets: [],
+      assets: [],
+      tickets: [],
+      tasks: [],
+      communications: [],
+      documents: [],
+      purchaseOrders: [],
+      decisions: [],
+      notifications: [],
+      reminderLogs: [],
+      auditLogs: [],
+      backups: [],
+      loginHistory: [],
+      syncConflicts: [],
+      zatcaInvoices: [],
+      employeeInvitations: [],
+      customRoles: [],
+      archiveSeeded: true,
+      teamSeeded: true,
+      rolePermissions: JSON.parse(JSON.stringify(DEFAULT_ROLE_PERMISSIONS)),
+      roleModulePermissions: buildAllDefaultRoleModulePermissions(),
+      counters: {
+        receipt: 0,
+        expense: 0,
+        ticket: 0,
+        journal: 0,
+        contract: 0
+      },
+      processedIdempotencyKeys: [],
+      entityRevisions: {},
+      syncRevision: 1,
+      lastUpdatedAt: now
+    };
+    this.sqlite.saveState(fresh);
+    const randomPin = crypto3.randomInt(1e5, 999999).toString();
+    this.sqlite.updateUserCredentials(adminId, {
+      password: input.password,
+      pin: input.pin || randomPin
+    });
+    return fresh;
+  }
+  loadInitialState() {
     const seed = createInitialSeed();
     try {
-      if (fs.existsSync(DB_FILE)) {
-        const raw = fs.readFileSync(DB_FILE, "utf-8");
+      const fromSqlite = this.sqlite.loadState();
+      if (fromSqlite && Array.isArray(fromSqlite.properties) && Array.isArray(fromSqlite.users)) {
+        return this.normalizeParsedState(fromSqlite, seed);
+      }
+      if (this.workspaceId === "default" && fs2.existsSync(this.paths.jsonFile)) {
+        const raw = fs2.readFileSync(this.paths.jsonFile, "utf-8");
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.properties) && Array.isArray(parsed.users)) {
-          const mergeMissingById = (existing = [], seedItems = []) => {
-            const seen = new Set(existing.map((x) => x.id));
-            return [...existing, ...seedItems.filter((item) => !seen.has(item.id))];
-          };
-          const shouldSeedArchive = !parsed.archiveSeeded && parsed.properties.length > 0;
-          const shouldSeedTeam = !parsed.teamSeeded && parsed.users.length > 0;
-          const mergedUsers = shouldSeedTeam ? [
-            ...parsed.users.map((u) => {
-              const seedMatch = seed.users.find((su) => su.id === u.id);
-              return {
-                ...seedMatch,
-                ...u,
-                statusState: u.statusState || seedMatch?.statusState || "\u0645\u062A\u0635\u0644",
-                specialty: u.specialty || seedMatch?.specialty,
-                managerRating: u.managerRating ?? seedMatch?.managerRating ?? 4.8,
-                lastActivitySummary: u.lastActivitySummary || seedMatch?.lastActivitySummary,
-                security: u.security || seedMatch?.security,
-                notificationPrefs: u.notificationPrefs || seedMatch?.notificationPrefs
-              };
-            }),
-            ...seed.users.filter((su) => !parsed.users.some((pu) => pu.id === su.id))
-          ] : parsed.users;
-          const mergedRolePermissions = {
-            ...DEFAULT_ROLE_PERMISSIONS,
-            ...parsed.rolePermissions || {}
-          };
-          return {
-            ...seed,
-            ...parsed,
-            users: mergedUsers,
-            rolePermissions: mergedRolePermissions,
-            units: shouldSeedArchive ? mergeMissingById(parsed.units, seed.units) : parsed.units,
-            payments: shouldSeedArchive ? mergeMissingById(parsed.payments, seed.payments) : parsed.payments,
-            tickets: shouldSeedArchive ? mergeMissingById(parsed.tickets, seed.tickets) : parsed.tickets,
-            tasks: shouldSeedArchive ? mergeMissingById(parsed.tasks, seed.tasks) : parsed.tasks,
-            documents: shouldSeedArchive ? mergeMissingById(parsed.documents, seed.documents) : parsed.documents,
-            savedArchiveFilters: Array.isArray(parsed.savedArchiveFilters) && parsed.savedArchiveFilters.length > 0 ? parsed.savedArchiveFilters : shouldSeedArchive ? seed.savedArchiveFilters : [],
-            archiveLastNightlyRun: parsed.archiveLastNightlyRun || seed.archiveLastNightlyRun,
-            archiveSeeded: parsed.archiveSeeded ?? true,
-            securityPolicy: parsed.securityPolicy || seed.securityPolicy,
-            loginHistory: Array.isArray(parsed.loginHistory) && parsed.loginHistory.length > 0 ? parsed.loginHistory : seed.loginHistory,
-            syncConflicts: Array.isArray(parsed.syncConflicts) && parsed.syncConflicts.length > 0 ? parsed.syncConflicts : seed.syncConflicts,
-            teamSeeded: parsed.teamSeeded ?? true,
-            settings: {
-              ...seed.settings,
-              ...parsed.settings || {},
-              currencyRatesToSar: {
-                ...seed.settings.currencyRatesToSar,
-                ...parsed.settings?.currencyRatesToSar || {}
-              },
-              bankAccounts: Array.isArray(parsed.settings?.bankAccounts) && parsed.settings.bankAccounts.length > 0 ? parsed.settings.bankAccounts : seed.settings.bankAccounts,
-              receiptBranding: {
-                ...seed.settings.receiptBranding,
-                ...parsed.settings?.receiptBranding || {}
-              },
-              generalPrefs: {
-                ...seed.settings.generalPrefs,
-                ...parsed.settings?.generalPrefs || {}
-              },
-              securityCenter: {
-                ...seed.settings.securityCenter,
-                ...parsed.settings?.securityCenter || {}
-              },
-              notificationsCenter: {
-                ...seed.settings.notificationsCenter,
-                ...parsed.settings?.notificationsCenter || {}
-              },
-              printShare: {
-                ...seed.settings.printShare,
-                ...parsed.settings?.printShare || {}
-              },
-              backupPolicy: {
-                ...seed.settings.backupPolicy,
-                ...parsed.settings?.backupPolicy || {}
-              },
-              syncCenter: {
-                ...seed.settings.syncCenter,
-                ...parsed.settings?.syncCenter || {}
-              },
-              developerCenter: {
-                ...seed.settings.developerCenter,
-                ...parsed.settings?.developerCenter || {}
-              }
-            },
-            companies: Array.isArray(parsed.companies) && parsed.companies.length > 0 ? parsed.companies : seed.companies,
-            vendors: (parsed.vendors || seed.vendors).map((v) => {
-              const seedV = seed.vendors.find((sv) => sv.id === v.id);
-              return { ...seedV, ...v };
-            }),
-            tenants: (shouldSeedArchive ? mergeMissingById(parsed.tenants, seed.tenants) : parsed.tenants).map((t) => {
-              const seedT = seed.tenants.find((st) => st.id === t.id);
-              return { ...seedT, ...t };
-            }),
-            contracts: (shouldSeedArchive ? mergeMissingById(parsed.contracts, seed.contracts) : parsed.contracts).map((c) => {
-              const seedC = seed.contracts.find((sc) => sc.id === c.id);
-              return { ...seedC, ...c };
-            }),
-            leads: (parsed.leads || seed.leads).map((l) => {
-              const seedL = seed.leads.find((sl) => sl.id === l.id);
-              return { ...seedL, ...l };
-            }),
-            leadEscalations: Array.isArray(parsed.leadEscalations) && parsed.leadEscalations.length > 0 ? parsed.leadEscalations : seed.leadEscalations,
-            supplierInvoices: Array.isArray(parsed.supplierInvoices) && parsed.supplierInvoices.length > 0 ? parsed.supplierInvoices : seed.supplierInvoices,
-            recurringExpenses: Array.isArray(parsed.recurringExpenses) && parsed.recurringExpenses.length > 0 ? parsed.recurringExpenses : seed.recurringExpenses,
-            propertyBudgets: Array.isArray(parsed.propertyBudgets) && parsed.propertyBudgets.length > 0 ? parsed.propertyBudgets : seed.propertyBudgets,
-            purchaseOrders: Array.isArray(parsed.purchaseOrders) ? parsed.purchaseOrders : seed.purchaseOrders,
-            decisions: Array.isArray(parsed.decisions) ? parsed.decisions : seed.decisions,
-            reminderRules: Array.isArray(parsed.reminderRules) ? parsed.reminderRules : seed.reminderRules,
-            reminderLogs: Array.isArray(parsed.reminderLogs) ? parsed.reminderLogs : seed.reminderLogs,
-            communicationTemplates: Array.isArray(parsed.communicationTemplates) && parsed.communicationTemplates.length > 0 ? parsed.communicationTemplates : seed.communicationTemplates,
-            meterReadings: Array.isArray(parsed.meterReadings) && parsed.meterReadings.length > 0 ? parsed.meterReadings : seed.meterReadings,
-            scheduledReports: Array.isArray(parsed.scheduledReports) ? parsed.scheduledReports : [],
-            favoriteReports: Array.isArray(parsed.favoriteReports) ? parsed.favoriteReports : [],
-            sharedSearchFilters: Array.isArray(parsed.sharedSearchFilters) ? parsed.sharedSearchFilters : [],
-            zatcaInvoices: Array.isArray(parsed.zatcaInvoices) ? parsed.zatcaInvoices : [],
-            syncRevision: typeof parsed.syncRevision === "number" ? parsed.syncRevision : 1
-          };
+          const normalized = this.normalizeParsedState(parsed, seed);
+          this.sqlite.saveState(normalized);
+          try {
+            fs2.copyFileSync(this.paths.jsonFile, `${this.paths.jsonFile}.migrated.bak`);
+          } catch {
+          }
+          return normalized;
         }
       }
     } catch (err) {
-      console.error("Failed to load DB file, resetting to seed:", err);
+      console.error("Failed to load SQLite/JSON DB, initializing seed:", err);
     }
     this.persist(seed);
     return seed;
   }
   persist(nextState = this.state) {
-    ensureDirs();
+    ensureWorkspaceDirs(this.paths);
     nextState.syncRevision = (nextState.syncRevision || 0) + 1;
     nextState.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    const tmpFile = `${DB_FILE}.tmp`;
-    fs.writeFileSync(tmpFile, JSON.stringify(nextState, null, 2), "utf-8");
-    fs.renameSync(tmpFile, DB_FILE);
+    this.sqlite.saveState(nextState);
     if (nextState === this.state) {
       this.rebuildIndexes();
     }
@@ -3178,21 +4784,98 @@ var AqarStore = class {
   getState() {
     return this.state;
   }
+  getWorkspaceCompanyId(companies = this.state?.companies) {
+    const def = (companies || []).find((c) => c.isDefault) || (companies || [])[0];
+    return def?.id || `comp-${this.workspaceId}`;
+  }
+  getCompanySummary() {
+    const def = (this.state.companies || []).find((c) => c.isDefault) || (this.state.companies || [])[0];
+    return {
+      id: def?.id || `comp-${this.workspaceId}`,
+      nameAr: this.state.settings?.nameAr || def?.nameAr || "AqarPlus",
+      nameEn: this.state.settings?.nameEn || def?.nameEn || "AqarPlus",
+      logoDataUrl: this.state.settings?.logoDataUrl
+    };
+  }
+  sanitizeUsersForActor(actor) {
+    const canManageUsers = this.userHasPermission(actor, "manage_users") || userHasModuleAction(this.state, actor, "team", "view");
+    if (canManageUsers) {
+      return this.state.users;
+    }
+    return this.state.users.map((u) => {
+      const isSelf = u.id === actor.id;
+      return {
+        id: u.id,
+        companyId: u.companyId,
+        nameAr: u.nameAr,
+        nameEn: u.nameEn,
+        username: isSelf ? u.username : void 0,
+        jobTitle: u.jobTitle,
+        department: u.department,
+        role: u.role,
+        roleLabelAr: u.roleLabelAr,
+        roleLabelEn: u.roleLabelEn,
+        customRoleId: isSelf ? u.customRoleId : void 0,
+        email: isSelf ? u.email : "",
+        phone: isSelf ? u.phone : "",
+        secondaryPhone: isSelf ? u.secondaryPhone : void 0,
+        approvalLimitSar: isSelf ? u.approvalLimitSar : 0,
+        active: u.active,
+        accountStatus: u.accountStatus,
+        ownerId: isSelf ? u.ownerId : void 0,
+        deviceName: isSelf ? u.deviceName : "",
+        lastActiveAt: u.lastActiveAt,
+        lastLoginAt: isSelf ? u.lastLoginAt : void 0,
+        joinedAt: isSelf ? u.joinedAt : void 0,
+        createdAt: isSelf ? u.createdAt : void 0,
+        statusState: u.statusState,
+        specialty: u.specialty,
+        avatarDataUrl: u.avatarDataUrl,
+        allowedPropertyIds: isSelf ? u.allowedPropertyIds : void 0,
+        customModulePermissions: isSelf ? u.customModulePermissions : void 0,
+        security: isSelf ? u.security : void 0,
+        notificationPrefs: isSelf ? u.notificationPrefs : void 0,
+        pendingEmailVerification: isSelf ? u.pendingEmailVerification : void 0,
+        pendingPhoneVerification: isSelf ? u.pendingPhoneVerification : void 0
+      };
+    });
+  }
   getStateForUser(userId) {
-    if (!userId) return this.state;
-    const user = this.state.users.find((u) => u.id === userId);
-    if (!user) return this.state;
+    if (!userId) {
+      throw new Error("\u064A\u062C\u0628 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0644\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A");
+    }
+    const user = this.state.users.find(
+      (u) => u.id === userId && u.active && (!u.accountStatus || u.accountStatus === "\u0646\u0634\u0637")
+    );
+    if (!user) {
+      throw new Error("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0644\u0647 \u0623\u0648 \u0645\u0648\u0642\u0648\u0641");
+    }
+    const canViewAudit = this.userHasPermission(user, "view_audit") || userHasModuleAction(this.state, user, "audit", "view");
+    const canBackup = this.userHasPermission(user, "backup_restore") || userHasModuleAction(this.state, user, "backups", "view");
+    const canViewTeam = this.userHasPermission(user, "manage_users") || userHasModuleAction(this.state, user, "team", "view");
+    const sanitizedUsers = this.sanitizeUsersForActor(user);
+    const visibleInvitations = canViewTeam ? this.state.employeeInvitations || [] : [];
     if (user.role !== "owner" && user.role !== "gm" && user.role !== "sys_owner") {
       const allowedProps = user.allowedPropertyIds;
       if (Array.isArray(allowedProps) && allowedProps.length > 0) {
         const propSet = new Set(allowedProps);
         const unitSet = new Set(this.state.units.filter((u) => propSet.has(u.propertyId)).map((u) => u.id));
         const ctrSet = new Set(this.state.contracts.filter((c) => propSet.has(c.propertyId)).map((c) => c.id));
+        const tenantSet = new Set(
+          this.state.contracts.filter((c) => propSet.has(c.propertyId)).map((c) => c.tenantId)
+        );
         return {
           ...this.state,
+          users: sanitizedUsers,
+          employeeInvitations: visibleInvitations,
+          auditLogs: canViewAudit ? this.state.auditLogs.filter((a) => !a.propertyId || propSet.has(a.propertyId)) : [],
+          loginHistory: canViewAudit ? this.state.loginHistory : [],
+          backups: canBackup ? this.state.backups : [],
           properties: this.state.properties.filter((p) => propSet.has(p.id)),
           units: this.state.units.filter((u) => unitSet.has(u.id)),
+          tenants: this.state.tenants.filter((t) => tenantSet.has(t.id)),
           contracts: this.state.contracts.filter((c) => ctrSet.has(c.id)),
+          handovers: this.state.handovers.filter((h) => propSet.has(h.propertyId)),
           installments: this.state.installments.filter((i) => propSet.has(i.propertyId)),
           payments: this.state.payments.filter((p) => propSet.has(p.propertyId)),
           expenses: this.state.expenses.filter((e) => propSet.has(e.propertyId)),
@@ -3202,13 +4885,30 @@ var AqarStore = class {
           tasks: this.state.tasks.filter((t) => !t.propertyId || propSet.has(t.propertyId) || t.assignedTo === user.id),
           leads: this.state.leads.filter((l) => propSet.has(l.propertyId)),
           leadEscalations: (this.state.leadEscalations || []).filter((le) => propSet.has(le.propertyId)),
-          meterReadings: (this.state.meterReadings || []).filter((mr) => propSet.has(mr.propertyId))
+          meterReadings: (this.state.meterReadings || []).filter((mr) => propSet.has(mr.propertyId)),
+          documents: this.state.documents.filter(
+            (d) => d.relatedType === "\u0634\u0631\u0643\u0629" || d.relatedType === "\u0639\u0642\u0627\u0631" && propSet.has(d.relatedId) || d.relatedType === "\u0648\u062D\u062F\u0629" && unitSet.has(d.relatedId) || d.relatedType === "\u0639\u0642\u062F" && ctrSet.has(d.relatedId) || d.relatedType === "\u0645\u0633\u062A\u0623\u062C\u0631" && tenantSet.has(d.relatedId)
+          )
         };
       }
-      return this.state;
+      return {
+        ...this.state,
+        users: sanitizedUsers,
+        employeeInvitations: visibleInvitations,
+        auditLogs: canViewAudit ? this.state.auditLogs : [],
+        loginHistory: canViewAudit ? this.state.loginHistory : [],
+        backups: canBackup ? this.state.backups : []
+      };
     }
     if (user.role !== "owner" || !user.ownerId) {
-      return this.state;
+      return {
+        ...this.state,
+        users: sanitizedUsers,
+        employeeInvitations: visibleInvitations,
+        auditLogs: canViewAudit ? this.state.auditLogs : [],
+        loginHistory: canViewAudit ? this.state.loginHistory : [],
+        backups: canBackup ? this.state.backups : []
+      };
     }
     const ownedPropIds = new Set(
       this.state.properties.filter((p) => p.ownerShares.some((s) => s.ownerId === user.ownerId)).map((p) => p.id)
@@ -3219,11 +4919,17 @@ var AqarStore = class {
     const ownedContractIds = new Set(
       this.state.contracts.filter((c) => ownedPropIds.has(c.propertyId)).map((c) => c.id)
     );
+    const ownedTenantIds = new Set(
+      this.state.contracts.filter((c) => ownedPropIds.has(c.propertyId)).map((c) => c.tenantId)
+    );
     return {
       ...this.state,
+      users: sanitizedUsers,
+      employeeInvitations: [],
       properties: this.state.properties.filter((p) => ownedPropIds.has(p.id)),
       units: this.state.units.filter((u) => ownedUnitIds.has(u.id)),
       contracts: this.state.contracts.filter((c) => ownedContractIds.has(c.id)),
+      handovers: this.state.handovers.filter((h) => ownedPropIds.has(h.propertyId)),
       installments: this.state.installments.filter((i) => ownedPropIds.has(i.propertyId)),
       payments: this.state.payments.filter((p) => ownedPropIds.has(p.propertyId)),
       expenses: this.state.expenses.filter((e) => ownedPropIds.has(e.propertyId) && e.approvalStatus === "\u0645\u0639\u062A\u0645\u062F"),
@@ -3234,26 +4940,36 @@ var AqarStore = class {
       leadEscalations: (this.state.leadEscalations || []).filter((le) => ownedPropIds.has(le.propertyId)),
       meterReadings: (this.state.meterReadings || []).filter((mr) => ownedPropIds.has(mr.propertyId)),
       owners: this.state.owners.filter((o) => o.id === user.ownerId),
-      tenants: this.state.tenants.filter(
-        (t) => this.state.contracts.some((c) => ownedPropIds.has(c.propertyId) && c.tenantId === t.id)
+      tenants: this.state.tenants.filter((t) => ownedTenantIds.has(t.id)),
+      documents: this.state.documents.filter(
+        (d) => d.relatedType === "\u0639\u0642\u0627\u0631" && ownedPropIds.has(d.relatedId) || d.relatedType === "\u0648\u062D\u062F\u0629" && ownedUnitIds.has(d.relatedId) || d.relatedType === "\u0639\u0642\u062F" && ownedContractIds.has(d.relatedId) || d.relatedType === "\u0645\u0633\u062A\u0623\u062C\u0631" && ownedTenantIds.has(d.relatedId)
       ),
-      auditLogs: []
+      auditLogs: [],
+      loginHistory: [],
+      backups: []
     };
   }
   getActingUser(userId) {
-    const user = this.state.users.find((u) => u.id === userId && u.active);
+    const user = this.state.users.find(
+      (u) => u.id === userId && u.active && (!u.accountStatus || u.accountStatus === "\u0646\u0634\u0637")
+    );
     if (!user) throw new Error("\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0623\u0648 \u0645\u0648\u0642\u0648\u0641");
     return user;
   }
   userHasPermission(user, permission) {
-    const perms = this.state.rolePermissions[user.role] || [];
-    return perms.includes("view_all") || perms.includes(permission);
+    return userHasLegacyPermission(this.state, user, permission);
   }
   assertPermission(userId, permission) {
     const user = this.getActingUser(userId);
-    const perms = this.state.rolePermissions[user.role] || [];
-    if (!perms.includes(permission)) {
-      throw new Error(`\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u0646\u0641\u064A\u0630 \u0647\u0630\u0627 \u0627\u0644\u0625\u062C\u0631\u0627\u0621 (${permission})`);
+    if (!this.userHasPermission(user, permission)) {
+      throw new PermissionDeniedError(`\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u0646\u0641\u064A\u0630 \u0647\u0630\u0627 \u0627\u0644\u0625\u062C\u0631\u0627\u0621 (${permission})`);
+    }
+    return user;
+  }
+  assertModuleAction(userId, module, action = "view") {
+    const user = this.getActingUser(userId);
+    if (!userHasModuleAction(this.state, user, module, action)) {
+      throw new PermissionDeniedError(`\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 (${action}) \u0639\u0644\u0649 \u0642\u0633\u0645 (${module})`);
     }
     return user;
   }
@@ -3686,6 +5402,13 @@ var AqarStore = class {
         const existing = this.state.payments.find((p) => p.idempotencyKey === input.idempotencyKey);
         if (existing) return existing;
       }
+      const cleanRef = input.referenceNumber ? input.referenceNumber.trim() : "";
+      if (cleanRef) {
+        const dupRef = this.state.payments.find(
+          (p) => p.contractId === input.contractId && p.referenceNumber === cleanRef && p.amount === input.amount && p.status === "\u0645\u0639\u062A\u0645\u062F"
+        );
+        if (dupRef) return dupRef;
+      }
       if (!input.amount || input.amount <= 0) throw new Error("\u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 \u0627\u0644\u0645\u0628\u0644\u063A \u0623\u0643\u0628\u0631 \u0645\u0646 \u0635\u0641\u0631");
       const contract = this.contractIndex.get(input.contractId) || this.state.contracts.find((c) => c.id === input.contractId);
       if (!contract) throw new Error("\u0627\u0644\u0639\u0642\u062F \u0627\u0644\u0645\u062D\u062F\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
@@ -3754,6 +5477,7 @@ var AqarStore = class {
       };
       this.state.payments.unshift(payment);
       this.state.processedIdempotencyKeys.push(input.idempotencyKey);
+      this.idempotencyIndex.add(input.idempotencyKey);
       if (unit && unit.status === "\u0645\u062A\u0623\u062E\u0631\u0629 \u0641\u064A \u0627\u0644\u0633\u062F\u0627\u062F") {
         const stillOverdue = this.state.installments.some(
           (i) => i.unitId === unit.id && i.status === "\u0645\u062A\u0623\u062E\u0631\u0629" && i.remainingAmount > 0
@@ -4584,45 +6308,59 @@ var AqarStore = class {
     }
     this.persist();
   }
-  createBackup(userId, label, deviceName) {
+  createBackup(userId, label, deviceName, encryptPassword) {
     const user = this.assertPermission(userId, "backup_restore");
-    ensureDirs();
+    ensureWorkspaceDirs(this.paths);
     const id = uid("bkp");
     const json = JSON.stringify(this.state, null, 2);
-    const defaultPath = path.join(BACKUP_DIR, `${id}.json`);
-    fs.writeFileSync(defaultPath, json, "utf-8");
+    const shouldEncrypt = Boolean(this.state.settings.backupPolicy?.encryptBackups || encryptPassword?.trim());
+    const ext = shouldEncrypt ? ".enc.json" : ".json";
+    const payloadToWrite = shouldEncrypt ? encryptBackupPayload(json, encryptPassword?.trim() || "AqarBackup@2026") : json;
+    const defaultPath = path2.join(this.paths.backupDir, `${id}${ext}`);
+    fs2.writeFileSync(defaultPath, payloadToWrite, "utf-8");
     const targetDir = this.getBackupsDir();
-    if (targetDir !== BACKUP_DIR) {
+    if (targetDir !== this.paths.backupDir) {
       try {
-        fs.mkdirSync(targetDir, { recursive: true });
-        fs.writeFileSync(path.join(targetDir, `${id}.json`), json, "utf-8");
+        fs2.mkdirSync(targetDir, { recursive: true });
+        fs2.writeFileSync(path2.join(targetDir, `${id}${ext}`), payloadToWrite, "utf-8");
       } catch {
       }
     }
     const recordCount = this.state.properties.length + this.state.units.length + this.state.tenants.length + this.state.contracts.length + this.state.payments.length + this.state.expenses.length + this.state.tickets.length;
     const snap = {
       id,
-      label: label || `\u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u064A\u062F\u0648\u064A\u0629 \xB7 ${(/* @__PURE__ */ new Date()).toLocaleDateString("ar-SA")}`,
+      label: label || `\u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 ${shouldEncrypt ? "\u0645\u0634\u0641\u0631\u0629 " : "\u064A\u062F\u0648\u064A\u0629 "}\xB7 ${(/* @__PURE__ */ new Date()).toLocaleDateString("ar-SA")}`,
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
       createdBy: user.nameAr,
       recordCount,
-      sizeKb: Math.max(1, Math.round(Buffer.byteLength(json, "utf-8") / 1024))
+      sizeKb: Math.max(1, Math.round(Buffer.byteLength(payloadToWrite, "utf-8") / 1024)),
+      encrypted: shouldEncrypt
     };
     this.state.backups.unshift(snap);
-    this.addAudit(user, "\u0625\u0646\u0634\u0627\u0621 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u0645\u0634\u0641\u0631\u0629", "Backup", snap.id, `\u062D\u0641\u0638 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 (${snap.sizeKb} KB)`, {
-      deviceName
-    });
+    this.addAudit(
+      user,
+      shouldEncrypt ? "\u0625\u0646\u0634\u0627\u0621 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u0645\u0634\u0641\u0631\u0629 AES-256" : "\u0625\u0646\u0634\u0627\u0621 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629",
+      "Backup",
+      snap.id,
+      `\u062D\u0641\u0638 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 (${snap.sizeKb} KB${shouldEncrypt ? " \xB7 AES-256-GCM" : ""})`,
+      { deviceName }
+    );
     this.persist();
     return snap;
   }
-  restoreBackup(userId, backupId, deviceName, mode = "replace") {
+  restoreBackup(userId, backupId, deviceName, mode = "replace", password) {
     const user = this.assertPermission(userId, "backup_restore");
     const filePath = this.resolveBackupFile(backupId);
     if (!filePath) {
       throw new Error("\u0645\u0644\u0641 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645 (\u062C\u0631\u0628 \u0625\u0646\u0634\u0627\u0621 \u0646\u0633\u062E\u0629 \u062C\u062F\u064A\u062F\u0629 \u0623\u0648\u0644\u0627\u064B)");
     }
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const restored = JSON.parse(raw);
+    const raw = fs2.readFileSync(filePath, "utf-8");
+    const decryptedRaw = isEncryptedBackupEnvelope(raw) ? decryptBackupPayload(raw, password) : raw;
+    const restored = JSON.parse(decryptedRaw);
+    try {
+      this.createBackup(userId, `\u0646\u0633\u062E\u0629 \u0623\u0645\u0627\u0646 \u062A\u0644\u0642\u0627\u0626\u064A\u0629 \u0642\u0628\u0644 \u0627\u0644\u0627\u0633\u062A\u0639\u0627\u062F\u0629 (${backupId})`, deviceName);
+    } catch {
+    }
     const currentBackups = this.state.backups;
     if (mode === "merge") {
       const mergeArrays = (current = [], incoming = []) => {
@@ -4641,6 +6379,24 @@ var AqarStore = class {
       this.state.documents = mergeArrays(this.state.documents, restored.documents);
       this.state.vendors = mergeArrays(this.state.vendors, restored.vendors);
       this.state.owners = mergeArrays(this.state.owners, restored.owners);
+      this.state.accounts = mergeArrays(this.state.accounts, restored.accounts);
+      this.state.journals = mergeArrays(this.state.journals, restored.journals);
+      this.state.communicationTemplates = mergeArrays(
+        this.state.communicationTemplates || [],
+        restored.communicationTemplates || []
+      );
+      this.state.reminderRules = mergeArrays(this.state.reminderRules || [], restored.reminderRules || []);
+      this.state.zatcaInvoices = mergeArrays(this.state.zatcaInvoices || [], restored.zatcaInvoices || []);
+      this.state.meterReadings = mergeArrays(this.state.meterReadings || [], restored.meterReadings || []);
+      if (restored.counters) {
+        this.state.counters = {
+          receipt: Math.max(this.state.counters.receipt, restored.counters.receipt || 0),
+          contract: Math.max(this.state.counters.contract, restored.counters.contract || 0),
+          ticket: Math.max(this.state.counters.ticket, restored.counters.ticket || 0),
+          expense: Math.max(this.state.counters.expense, restored.counters.expense || 0),
+          journal: Math.max(this.state.counters.journal, restored.counters.journal || 0)
+        };
+      }
       this.addAudit(
         user,
         "\u062F\u0645\u062C \u0630\u0643\u064A \u0645\u0646 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629",
@@ -4652,6 +6408,7 @@ var AqarStore = class {
     } else {
       this.state = restored;
       this.state.backups = currentBackups;
+      this.sqlite.ensureSeedCredentials(this.state.users);
       this.addAudit(
         user,
         "\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 (\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0643\u0627\u0645\u0644)",
@@ -5958,6 +7715,10 @@ var AqarStore = class {
       }
     };
     this.state.users.push(newUser);
+    this.sqlite.updateUserCredentials(newUser.id, {
+      password: input.tempPassword || "Aqar@2026",
+      pin: "1234"
+    });
     this.addAudit(
       actor,
       "\u0625\u0636\u0627\u0641\u0629 \u0645\u0648\u0638\u0641 \u062C\u062F\u064A\u062F",
@@ -6238,7 +7999,24 @@ var AqarStore = class {
     this.persist();
     return count;
   }
-  previewBackup(backupId) {
+  diffCollection(current = [], incoming = []) {
+    const curMap = new Map(current.map((item) => [item.id, JSON.stringify(item)]));
+    let added = 0;
+    let updated = 0;
+    let unchanged = 0;
+    for (const item of incoming) {
+      const existing = curMap.get(item.id);
+      if (existing === void 0) {
+        added += 1;
+      } else if (existing !== JSON.stringify(item)) {
+        updated += 1;
+      } else {
+        unchanged += 1;
+      }
+    }
+    return { added, updated, unchanged };
+  }
+  previewBackup(backupId, password) {
     const filePath = this.resolveBackupFile(backupId);
     if (!filePath) {
       return {
@@ -6252,17 +8030,66 @@ var AqarStore = class {
         templatesCount: 0
       };
     }
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const raw = fs2.readFileSync(filePath, "utf-8");
+    const encrypted = isEncryptedBackupEnvelope(raw);
+    let decryptedRaw = raw;
+    if (encrypted) {
+      if (!password?.trim()) {
+        return {
+          id: backupId,
+          exists: true,
+          encrypted: true,
+          requiresPassword: true,
+          propertiesCount: 0,
+          unitsCount: 0,
+          tenantsCount: 0,
+          contractsCount: 0,
+          paymentsCount: 0,
+          templatesCount: 0
+        };
+      }
+      try {
+        decryptedRaw = decryptBackupPayload(raw, password);
+      } catch (err) {
+        return {
+          id: backupId,
+          exists: true,
+          encrypted: true,
+          requiresPassword: true,
+          decryptionError: err.message,
+          propertiesCount: 0,
+          unitsCount: 0,
+          tenantsCount: 0,
+          contractsCount: 0,
+          paymentsCount: 0,
+          templatesCount: 0
+        };
+      }
+    }
+    const parsed = JSON.parse(decryptedRaw);
+    const diff = {
+      properties: this.diffCollection(this.state.properties, parsed.properties || []),
+      units: this.diffCollection(this.state.units, parsed.units || []),
+      tenants: this.diffCollection(this.state.tenants, parsed.tenants || []),
+      contracts: this.diffCollection(this.state.contracts, parsed.contracts || []),
+      payments: this.diffCollection(this.state.payments, parsed.payments || []),
+      expenses: this.diffCollection(this.state.expenses, parsed.expenses || []),
+      tickets: this.diffCollection(this.state.tickets, parsed.tickets || [])
+    };
+    const totalChanged = Object.values(diff).reduce((s, d) => s + d.added + d.updated, 0);
     return {
       id: backupId,
       exists: true,
+      encrypted,
+      requiresPassword: false,
       propertiesCount: parsed.properties?.length || 0,
       unitsCount: parsed.units?.length || 0,
       tenantsCount: parsed.tenants?.length || 0,
       contractsCount: parsed.contracts?.length || 0,
       paymentsCount: parsed.payments?.length || 0,
       templatesCount: parsed.communicationTemplates?.length || 0,
-      lastUpdatedAt: parsed.lastUpdatedAt
+      lastUpdatedAt: parsed.lastUpdatedAt,
+      diff: { ...diff, totalChanged }
     };
   }
   clearTempCache(userId, deviceName) {
@@ -7134,23 +8961,36 @@ var AqarStore = class {
     };
   }
   evaluateSyncOperationConflict(userId, op, clientLastUpdatedAt) {
-    if (this.idempotencyIndex.has(op.idempotencyKey)) {
-      return { skipDuplicate: true };
+    const opKey = op.operationId || op.idempotencyKey;
+    const existingOp = this.sqlite.hasOperation(opKey);
+    if (existingOp || this.idempotencyIndex.has(op.idempotencyKey)) {
+      let cachedResult;
+      if (existingOp?.resultJson) {
+        try {
+          cachedResult = JSON.parse(existingOp.resultJson);
+        } catch {
+          cachedResult = void 0;
+        }
+      }
+      return { skipDuplicate: true, cachedResult };
     }
-    const isPatch = op.method === "PATCH";
-    const hasConcurrentUpdate = Boolean(clientLastUpdatedAt && this.state.lastUpdatedAt > clientLastUpdatedAt);
-    if (isPatch && hasConcurrentUpdate) {
+    const isMutationOnExisting = op.method === "PATCH" || op.method === "DELETE";
+    const entityKey = op.entityType && op.entityId ? `${op.entityType}:${op.entityId}` : void 0;
+    const serverEntityRev = entityKey ? this.state.entityRevisions?.[entityKey] || 1 : void 0;
+    const revisionMismatch = isMutationOnExisting && typeof op.baseRevision === "number" && typeof serverEntityRev === "number" && serverEntityRev > op.baseRevision;
+    const timestampMismatch = isMutationOnExisting && typeof op.baseRevision !== "number" && Boolean(clientLastUpdatedAt && this.state.lastUpdatedAt > clientLastUpdatedAt);
+    if (revisionMismatch || timestampMismatch) {
       const user = this.state.users.find((u) => u.id === userId);
       const policy = this.state.settings.syncCenter?.conflictResolution || "latest_wins";
-      const status = policy === "manual_review" ? "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0645\u0631\u0627\u062C\u0639\u0629 \u0627\u0644\u0645\u062F\u064A\u0631" : policy === "current_device" ? "\u062A\u0645 \u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0623\u062D\u062F\u062B" : "\u062A\u0645 \u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0623\u062D\u062F\u062B";
+      const status = policy === "manual_review" ? "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0645\u0631\u0627\u062C\u0639\u0629 \u0627\u0644\u0645\u062F\u064A\u0631" : "\u062A\u0645 \u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0623\u062D\u062F\u062B";
       const conflict = {
         id: uid("cnf"),
-        entityType: "SyncBatch",
-        entityId: op.endpoint,
+        entityType: op.entityType || "SyncBatch",
+        entityId: op.entityId || op.endpoint,
         entityLabel: op.descriptionAr || op.endpoint,
         firstActorName: "\u0627\u0644\u062E\u0627\u062F\u0645 \u0627\u0644\u0645\u0631\u0643\u0632\u064A (\u062A\u0639\u062F\u064A\u0644 \u0645\u062A\u0632\u0627\u0645\u0646)",
         secondActorName: `${user?.nameAr || userId} (${op.deviceName || "\u062C\u0647\u0627\u0632 \u0637\u0631\u0641\u064A"})`,
-        firstChangeSummary: `\u062A\u0639\u062F\u064A\u0644 \u0633\u0627\u0628\u0642 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645 \u0628\u062A\u0627\u0631\u064A\u062E ${this.state.lastUpdatedAt.slice(0, 16).replace("T", " ")}`,
+        firstChangeSummary: revisionMismatch ? `\u0646\u0633\u062E\u0629 \u0627\u0644\u062E\u0627\u062F\u0645 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u0631\u0642\u0645 ${serverEntityRev} \u0645\u0642\u0627\u0628\u0644 \u0646\u0633\u062E\u0629 \u0627\u0644\u0639\u0645\u064A\u0644 ${op.baseRevision}` : `\u062A\u0639\u062F\u064A\u0644 \u0633\u0627\u0628\u0642 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645 \u0628\u062A\u0627\u0631\u064A\u062E ${this.state.lastUpdatedAt.slice(0, 16).replace("T", " ")}`,
         secondChangeSummary: `\u0645\u0632\u0627\u0645\u0646\u0629 \u0645\u0646 \u0648\u0636\u0639 \u0639\u062F\u0645 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 (${op.descriptionAr})`,
         status,
         resolvedBy: status === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0645\u0631\u0627\u062C\u0639\u0629 \u0627\u0644\u0645\u062F\u064A\u0631" ? void 0 : "\u0645\u062D\u0631\u0643 \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A",
@@ -7163,6 +9003,30 @@ var AqarStore = class {
       return { skipDuplicate: false, conflict };
     }
     return { skipDuplicate: false };
+  }
+  recordSyncOperationResult(operationId, userId, method, endpoint, result, entityType, entityId) {
+    if (!operationId) return;
+    if (!this.state.processedIdempotencyKeys.includes(operationId)) {
+      this.state.processedIdempotencyKeys.push(operationId);
+      if (this.state.processedIdempotencyKeys.length > 2e3) {
+        this.state.processedIdempotencyKeys = this.state.processedIdempotencyKeys.slice(-2e3);
+      }
+    }
+    this.idempotencyIndex.add(operationId);
+    if (entityType && entityId) {
+      this.bumpEntityRevision(`${entityType}:${entityId}`);
+    }
+    this.sqlite.recordOperation({
+      operationId,
+      userId,
+      method,
+      endpoint,
+      entityType,
+      entityId,
+      resultJson: JSON.stringify(result),
+      status: "completed",
+      createdAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
   }
   // 21. Advanced Report Builder — Scheduled Reports
   createScheduledReport(userId, input, deviceName) {
@@ -7267,7 +9131,7 @@ var AqarStore = class {
     const sellerName = this.state.settings.nameAr;
     const vatNumber = this.state.settings.vatNumber || "310489211400003";
     const tlvBase64 = this.buildZatcaTlvBase64(sellerName, vatNumber, now, totalWithVat, vatAmount);
-    const invoiceHash = crypto.createHash("sha256").update(`${invNum}|${vatNumber}|${now}|${totalWithVat.toFixed(2)}|${vatAmount.toFixed(2)}`).digest("hex");
+    const invoiceHash = crypto3.createHash("sha256").update(`${invNum}|${vatNumber}|${now}|${totalWithVat.toFixed(2)}|${vatAmount.toFixed(2)}`).digest("hex");
     const clearanceStatus = this.state.settings.zatcaPhase.includes("\u0627\u0644\u062B\u0627\u0646\u064A\u0629") ? "\u062A\u0645 \u0627\u0644\u0631\u0628\u0637 \u0648\u0627\u0644\u062A\u062D\u0642\u0642 (\u0627\u0644\u0645\u0631\u062D\u0644\u0629 2)" : "\u0645\u0624\u0631\u0634\u0641 (\u0627\u0644\u0645\u0631\u062D\u0644\u0629 1)";
     const record = {
       id: uid("zatca"),
@@ -7381,41 +9245,46 @@ Total: ${totalWithVat} SAR`,
       return fallbackDir;
     }
     try {
-      const resolved = path.resolve(raw);
-      if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
+      const resolved = path2.resolve(raw);
+      if (!fs2.existsSync(resolved)) fs2.mkdirSync(resolved, { recursive: true });
       return resolved;
     } catch {
       return fallbackDir;
     }
   }
   getBackupsDir() {
-    return this.resolveStorageDir(this.state.settings.backupPolicy?.customPath, BACKUP_DIR);
+    return this.resolveStorageDir(this.state.settings.backupPolicy?.customPath, this.paths.backupDir);
   }
   getArchiveDir() {
-    return this.resolveStorageDir(this.state.settings.backupPolicy?.archivePath, ARCHIVE_DIR);
+    return this.resolveStorageDir(this.state.settings.backupPolicy?.archivePath, this.paths.archiveDir);
   }
   getDocumentsDir() {
-    return this.resolveStorageDir(this.state.settings.backupPolicy?.documentsPath, DOCUMENTS_DIR);
+    return this.resolveStorageDir(this.state.settings.backupPolicy?.documentsPath, this.paths.documentsDir);
   }
   resolveBackupFile(backupId) {
-    const customCandidate = path.join(this.getBackupsDir(), `${backupId}.json`);
-    if (fs.existsSync(customCandidate)) return customCandidate;
-    const defaultCandidate = path.join(BACKUP_DIR, `${backupId}.json`);
-    if (fs.existsSync(defaultCandidate)) return defaultCandidate;
+    const candidates = [
+      path2.join(this.getBackupsDir(), `${backupId}.enc.json`),
+      path2.join(this.getBackupsDir(), `${backupId}.json`),
+      path2.join(this.paths.backupDir, `${backupId}.enc.json`),
+      path2.join(this.paths.backupDir, `${backupId}.json`)
+    ];
+    for (const candidate of candidates) {
+      if (fs2.existsSync(candidate)) return candidate;
+    }
     return null;
   }
   writeDocumentToDisk(doc) {
     try {
       const dir = this.getDocumentsDir();
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      if (!fs2.existsSync(dir)) fs2.mkdirSync(dir, { recursive: true });
       const safeBase = (doc.fileName || `${doc.id}.json`).replace(/[<>:"/\\|?*]+/g, "_");
-      const targetFile = path.join(dir, `${doc.id}_${safeBase}`);
+      const targetFile = path2.join(dir, `${doc.id}_${safeBase}`);
       if (doc.dataUrl && doc.dataUrl.includes(";base64,")) {
         const base64Part = doc.dataUrl.split(";base64,")[1];
-        fs.writeFileSync(targetFile, Buffer.from(base64Part, "base64"));
+        fs2.writeFileSync(targetFile, Buffer.from(base64Part, "base64"));
       } else {
-        const metaFile = path.join(dir, `${doc.id}_${safeBase}.meta.json`);
-        fs.writeFileSync(metaFile, JSON.stringify({ id: doc.id, title: doc.title, category: doc.category, fileName: doc.fileName, createdAt: doc.createdAt }, null, 2), "utf-8");
+        const metaFile = path2.join(dir, `${doc.id}_${safeBase}.meta.json`);
+        fs2.writeFileSync(metaFile, JSON.stringify({ id: doc.id, title: doc.title, category: doc.category, fileName: doc.fileName, createdAt: doc.createdAt }, null, 2), "utf-8");
         return metaFile;
       }
       return targetFile;
@@ -7426,7 +9295,7 @@ Total: ${totalWithVat} SAR`,
   writeArchiveBundleToDisk() {
     try {
       const dir = this.getArchiveDir();
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      if (!fs2.existsSync(dir)) fs2.mkdirSync(dir, { recursive: true });
       const bundles = {
         contracts: this.state.contracts.filter((c) => Boolean(c.archivedAt)),
         tenants: this.state.tenants.filter((t) => Boolean(t.archivedAt)),
@@ -7437,8 +9306,8 @@ Total: ${totalWithVat} SAR`,
       };
       let written = 0;
       for (const [key, items] of Object.entries(bundles)) {
-        const filePath = path.join(dir, `archive-${key}.json`);
-        fs.writeFileSync(filePath, JSON.stringify({ updatedAt: (/* @__PURE__ */ new Date()).toISOString(), count: items.length, items }, null, 2), "utf-8");
+        const filePath = path2.join(dir, `archive-${key}.json`);
+        fs2.writeFileSync(filePath, JSON.stringify({ updatedAt: (/* @__PURE__ */ new Date()).toISOString(), count: items.length, items }, null, 2), "utf-8");
         written += 1;
       }
       return written;
@@ -7456,53 +9325,54 @@ Total: ${totalWithVat} SAR`,
       };
     }
     try {
-      const resolved = path.resolve(raw);
-      if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
-      const probe = path.join(resolved, `.aqarplus-probe-${Date.now()}.tmp`);
-      fs.writeFileSync(probe, "ok", "utf-8");
-      fs.unlinkSync(probe);
+      const resolved = path2.resolve(raw);
+      if (!fs2.existsSync(resolved)) fs2.mkdirSync(resolved, { recursive: true });
+      const probe = path2.join(resolved, `.aqarplus-probe-${Date.now()}.tmp`);
+      fs2.writeFileSync(probe, "ok", "utf-8");
+      fs2.unlinkSync(probe);
       return { ok: true, resolvedPath: resolved };
     } catch (err) {
       return { ok: false, resolvedPath: raw, error: err.message };
     }
   }
   getStorageStatus() {
-    ensureDirs();
+    ensureWorkspaceDirs(this.paths);
     const backupsDir = this.getBackupsDir();
     const archiveDir = this.getArchiveDir();
     const documentsDir = this.getDocumentsDir();
     const countFiles = (dir) => {
       try {
-        return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
+        return fs2.existsSync(dir) ? fs2.readdirSync(dir).length : 0;
       } catch {
         return 0;
       }
     };
     return {
-      dataDir: DATA_DIR,
+      dataDir: this.paths.dataDir,
       backupsDir,
       archiveDir,
       documentsDir,
       backupsFilesCount: countFiles(backupsDir),
       archiveFilesCount: countFiles(archiveDir),
       documentsFilesCount: countFiles(documentsDir),
-      platform: process.platform
+      platform: process.platform,
+      sqlite: this.sqlite.getDiagnostics()
     };
   }
   syncFoldersToDisk(userId, deviceName) {
     const user = this.assertPermission(userId, "backup_restore");
-    ensureDirs();
+    ensureWorkspaceDirs(this.paths);
     const backupsDir = this.getBackupsDir();
     let backupsSynced = 0;
     try {
-      if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+      if (!fs2.existsSync(backupsDir)) fs2.mkdirSync(backupsDir, { recursive: true });
       for (const bkp of this.state.backups) {
-        const src = path.join(BACKUP_DIR, `${bkp.id}.json`);
-        const dst = path.join(backupsDir, `${bkp.id}.json`);
-        if (fs.existsSync(src) && src !== dst) {
-          fs.copyFileSync(src, dst);
+        const src = path2.join(this.paths.backupDir, `${bkp.id}.json`);
+        const dst = path2.join(backupsDir, `${bkp.id}.json`);
+        if (fs2.existsSync(src) && src !== dst) {
+          fs2.copyFileSync(src, dst);
           backupsSynced += 1;
-        } else if (fs.existsSync(dst)) {
+        } else if (fs2.existsSync(dst)) {
           backupsSynced += 1;
         }
       }
@@ -7531,6 +9401,1122 @@ Total: ${totalWithVat} SAR`,
       archiveFilesSynced,
       documentsSynced,
       status: this.getStorageStatus()
+    };
+  }
+  // 22. Employee Invitations, Workforce Lifecycle, Custom Roles, Profile & Credential Recovery
+  isLocalSimulationAllowed() {
+    return process.env.NODE_ENV !== "production" || process.env.AQAR_LOCAL_RECOVERY_PREVIEW === "true";
+  }
+  assertTeamManager(userId) {
+    const actor = this.assertModuleAction(userId, "team", "manage");
+    if (actor.role !== "sys_owner" && actor.role !== "gm") {
+      throw new PermissionDeniedError("\u0625\u062F\u0627\u0631\u0629 \u0641\u0631\u064A\u0642 \u0627\u0644\u0639\u0645\u0644 \u0648\u0627\u0644\u062F\u0639\u0648\u0627\u062A \u0645\u062A\u0627\u062D\u0629 \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629 \u0641\u0642\u0637");
+    }
+    return actor;
+  }
+  resolveRoleMeta(role, customRoleId) {
+    if (customRoleId && Array.isArray(this.state.customRoles)) {
+      const custom = this.state.customRoles.find((r) => r.id === customRoleId);
+      if (custom) {
+        return { roleLabelAr: custom.nameAr, roleLabelEn: custom.nameEn };
+      }
+    }
+    const tpl = ROLE_TEMPLATES.find((t) => t.key === role);
+    if (tpl) {
+      return { roleLabelAr: tpl.labelAr, roleLabelEn: tpl.labelEn };
+    }
+    return { roleLabelAr: "\u0645\u0648\u0638\u0641", roleLabelEn: "Staff Member" };
+  }
+  buildInviteDeliveryNotice(channel, recipientPhone, recipientEmail, inviteUrl, verificationCode, companyNameAr) {
+    const cleanPhone = (recipientPhone || "").replace(/[^\d]/g, "");
+    const waPhone = cleanPhone.startsWith("05") ? `966${cleanPhone.slice(1)}` : cleanPhone;
+    const messageText = `\u0645\u0631\u062D\u0628\u0627\u064B\u060C \u0646\u062F\u0639\u0648\u0643 \u0644\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 \u0641\u0631\u064A\u0642 ${companyNameAr} \u0641\u064A \u0646\u0638\u0627\u0645 AqarPlus.
+\u0631\u0627\u0628\u0637 \u0627\u0644\u062A\u0641\u0639\u064A\u0644:
+${inviteUrl}
+\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642: ${verificationCode}`;
+    const integrations = this.state.settings?.integrationsConfig;
+    if (channel === "whatsapp") {
+      const externalGatewayConfigured = Boolean(integrations?.whatsappBusinessEnabled);
+      return {
+        handoffUrl: `https://wa.me/${waPhone}?text=${encodeURIComponent(messageText)}`,
+        externalGatewayConfigured,
+        deliveryNotice: externalGatewayConfigured ? "\u062A\u0645 \u062A\u062C\u0647\u064A\u0632 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0625\u0631\u0633\u0627\u0644\u0647\u0627 \u0639\u0628\u0631 \u0628\u0648\u0627\u0628\u0629 \u0648\u0627\u062A\u0633\u0627\u0628 \u0627\u0644\u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u0645\u062A\u0635\u0644\u0629." : "\u062A\u0645 \u062A\u0648\u0644\u064A\u062F \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u062D\u0644\u064A\u0627\u064B \u2014 \u0627\u0633\u062A\u062E\u062F\u0645 \u0632\u0631 \u0641\u062A\u062D \u0648\u0627\u062A\u0633\u0627\u0628 \u0623\u0648 \u0646\u0633\u062E \u0627\u0644\u0631\u0627\u0628\u0637 \u0644\u0625\u0631\u0633\u0627\u0644\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 (\u0644\u0627 \u062A\u0648\u062C\u062F \u0628\u0648\u0627\u0628\u0629 WhatsApp API \u0645\u0641\u0639\u0651\u0644\u0629 \u0644\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0622\u0644\u064A)."
+      };
+    }
+    if (channel === "email") {
+      const externalGatewayConfigured = Boolean(integrations?.smtpEnabled);
+      const subject = `\u062F\u0639\u0648\u0629 \u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 ${companyNameAr} \u2014 AqarPlus`;
+      return {
+        handoffUrl: `mailto:${encodeURIComponent(recipientEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(messageText)}`,
+        externalGatewayConfigured,
+        deliveryNotice: externalGatewayConfigured ? "\u062A\u0645 \u062A\u062C\u0647\u064A\u0632 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0625\u0631\u0633\u0627\u0644\u0647\u0627 \u0639\u0628\u0631 \u062E\u0627\u062F\u0645 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A (SMTP) \u0627\u0644\u0645\u0641\u0639\u0651\u0644." : "\u062A\u0645 \u062A\u0648\u0644\u064A\u062F \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u062D\u0644\u064A\u0627\u064B \u2014 \u0627\u0633\u062A\u062E\u062F\u0645 \u0632\u0631 \u0641\u062A\u062D \u0627\u0644\u0628\u0631\u064A\u062F \u0623\u0648 \u0646\u0633\u062E \u0627\u0644\u0631\u0627\u0628\u0637 \u0644\u0625\u0631\u0633\u0627\u0644\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 (\u0644\u0627 \u062A\u0648\u062C\u062F \u0625\u0639\u062F\u0627\u062F\u0627\u062A SMTP \u0645\u0641\u0639\u0651\u0644\u0629)."
+      };
+    }
+    if (channel === "sms") {
+      const externalGatewayConfigured = Boolean(integrations?.smsGatewayEnabled);
+      return {
+        handoffUrl: `sms:${cleanPhone}?body=${encodeURIComponent(messageText)}`,
+        externalGatewayConfigured,
+        deliveryNotice: externalGatewayConfigured ? "\u062A\u0645 \u0625\u0631\u0633\u0627\u0644 \u0631\u0633\u0627\u0644\u0629 \u0627\u0644\u062F\u0639\u0648\u0629 \u0627\u0644\u0646\u0635\u064A\u0629 \u0639\u0628\u0631 \u0628\u0648\u0627\u0628\u0629 SMS \u0627\u0644\u0645\u062A\u0635\u0644\u0629." : "\u062A\u0645 \u062A\u0648\u0644\u064A\u062F \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u062D\u0644\u064A\u0627\u064B \u2014 \u0627\u0633\u062A\u062E\u062F\u0645 \u0632\u0631 \u0641\u062A\u062D \u0627\u0644\u0631\u0633\u0627\u0626\u0644 SMS \u0623\u0648 \u0646\u0633\u062E \u0627\u0644\u0631\u0627\u0628\u0637 \u0644\u0625\u0631\u0633\u0627\u0644\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 (\u0644\u0627 \u062A\u0648\u062C\u062F \u0628\u0648\u0627\u0628\u0629 SMS \u0645\u0641\u0639\u0651\u0644\u0629)."
+      };
+    }
+    return {
+      handoffUrl: inviteUrl,
+      externalGatewayConfigured: false,
+      deliveryNotice: "\u062A\u0645 \u062A\u0648\u0644\u064A\u062F \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0645\u0643\u0648\u0646 \u0645\u0646 6 \u0623\u0631\u0642\u0627\u0645 \u2014 \u0627\u0646\u0633\u062E \u0627\u0644\u0631\u0627\u0628\u0637 \u0648\u0627\u0644\u0631\u0645\u0632 \u0648\u0623\u0631\u0633\u0644\u0647\u0645\u0627 \u0644\u0644\u0645\u0648\u0638\u0641."
+    };
+  }
+  createEmployeeWithInvite(actorUserId, input, originUrl, deviceName) {
+    return this.runTransaction(() => {
+      const actor = this.assertTeamManager(actorUserId);
+      if (!input.nameAr?.trim() || !input.phone?.trim() || !input.email?.trim()) {
+        throw new Error("\u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644\u060C \u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0627\u0644\u0623\u0633\u0627\u0633\u064A\u060C \u0648\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u062D\u0642\u0648\u0644 \u0645\u0637\u0644\u0648\u0628\u0629");
+      }
+      const normEmail = input.email.trim().toLowerCase();
+      const normPhone = input.phone.trim();
+      const normUsername = input.username?.trim() ? input.username.trim().toLowerCase() : void 0;
+      if (actor.role === "gm" && (input.role === "sys_owner" || input.role === "gm")) {
+        throw new PermissionDeniedError("\u0625\u0636\u0627\u0641\u0629 \u0645\u0627\u0644\u0643 \u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0639\u0627\u0645 \u0635\u0644\u0627\u062D\u064A\u0629 \u062D\u0635\u0631\u064A\u0629 \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0641\u0642\u0637");
+      }
+      if (this.state.users.some((u) => u.email.toLowerCase() === normEmail)) {
+        throw new Error("\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644 \u0644\u062D\u0633\u0627\u0628 \u0622\u062E\u0631 \u062F\u0627\u062E\u0644 \u0627\u0644\u0634\u0631\u0643\u0629");
+      }
+      if (this.state.users.some((u) => u.phone === normPhone)) {
+        throw new Error("\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u0645\u0633\u062C\u0644 \u0628\u0627\u0644\u0641\u0639\u0644 \u0644\u0645\u0648\u0638\u0641 \u0622\u062E\u0631");
+      }
+      if (normUsername && this.state.users.some((u) => u.username?.toLowerCase() === normUsername)) {
+        throw new Error("\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644 \u2014 \u0627\u062E\u062A\u0631 \u0627\u0633\u0645\u0627\u064B \u0622\u062E\u0631");
+      }
+      if (input.customRoleId) {
+        const customExists = (this.state.customRoles || []).some((r) => r.id === input.customRoleId);
+        if (!customExists) throw new Error("\u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635 \u0627\u0644\u0645\u062D\u062F\u062F \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      }
+      const companyId = this.getWorkspaceCompanyId();
+      const company = this.getCompanySummary();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1e3).toISOString();
+      const meta = this.resolveRoleMeta(input.role, input.customRoleId);
+      const newUser = {
+        id: uid("usr"),
+        companyId,
+        nameAr: input.nameAr.trim(),
+        nameEn: (input.nameEn || input.nameAr).trim(),
+        username: normUsername,
+        jobTitle: input.jobTitle?.trim() || meta.roleLabelAr,
+        department: input.department?.trim() || "\u0627\u0644\u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0639\u0627\u0645\u0629",
+        role: input.role,
+        roleLabelAr: meta.roleLabelAr,
+        roleLabelEn: meta.roleLabelEn,
+        customRoleId: input.customRoleId,
+        email: normEmail,
+        phone: normPhone,
+        secondaryPhone: input.secondaryPhone?.trim() || void 0,
+        approvalLimitSar: Number(input.approvalLimitSar || 0),
+        active: false,
+        accountStatus: "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644",
+        deviceName: "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644 \u0639\u0628\u0631 \u0627\u0644\u062F\u0639\u0648\u0629",
+        lastActiveAt: now,
+        createdAt: now,
+        statusState: "\u063A\u064A\u0631 \u0645\u062A\u0635\u0644",
+        specialty: input.jobTitle?.trim() || meta.roleLabelAr,
+        avatarDataUrl: input.avatarDataUrl,
+        allowedPropertyIds: input.allowedPropertyIds && input.allowedPropertyIds.length > 0 ? input.allowedPropertyIds : void 0,
+        customModulePermissions: input.customModulePermissions,
+        managerRating: 5,
+        lastActivitySummary: "\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628 \u0648\u0625\u0631\u0633\u0627\u0644 \u062F\u0639\u0648\u0629 \u0627\u0644\u062A\u0641\u0639\u064A\u0644",
+        security: {
+          twoFactorEnabled: false,
+          biometricEnabled: false,
+          hasPin: false,
+          failedAttempts: 0,
+          lastPasswordChangedAt: void 0,
+          requirePasswordChange90d: true,
+          tempPasswordSet: false
+        },
+        notificationPrefs: {
+          dndEnabled: false,
+          taskAssigned: true,
+          taskReminder: true,
+          taskApproved: true,
+          taskComment: true,
+          urgentTicket: true
+        }
+      };
+      const rawToken = crypto3.randomBytes(24).toString("hex");
+      const verificationCode = String(crypto3.randomInt(1e5, 1e6));
+      const invId = uid("inv");
+      this.sqlite.createInviteSecret({
+        invitationId: invId,
+        userId: newUser.id,
+        companyId,
+        rawToken,
+        verificationCode,
+        expiresAt
+      });
+      const baseOrigin = (originUrl || "").replace(/\/+$/, "");
+      const inviteUrl = `${baseOrigin}/?inviteToken=${encodeURIComponent(rawToken)}&workspace=${encodeURIComponent(this.workspaceId)}`;
+      const channel = input.channel || "copy_link";
+      const delivery = this.buildInviteDeliveryNotice(
+        channel,
+        newUser.phone,
+        newUser.email,
+        inviteUrl,
+        verificationCode,
+        company.nameAr
+      );
+      const invitation = {
+        id: invId,
+        userId: newUser.id,
+        companyId,
+        companyNameAr: company.nameAr,
+        fullName: newUser.nameAr,
+        jobTitle: newUser.jobTitle,
+        department: newUser.department,
+        email: newUser.email,
+        phone: newUser.phone,
+        secondaryPhone: newUser.secondaryPhone,
+        username: newUser.username,
+        role: newUser.role,
+        roleLabelAr: newUser.roleLabelAr,
+        customRoleId: newUser.customRoleId,
+        channel,
+        deliveryMode: delivery.externalGatewayConfigured ? "gateway" : "handoff",
+        deliveryNote: delivery.deliveryNotice,
+        status: "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644",
+        tokenPreview: sha256Hex(rawToken).slice(0, 12),
+        invitedByUserId: actor.id,
+        invitedByName: actor.nameAr,
+        sentAt: now,
+        expiresAt,
+        resendCount: 0
+      };
+      if (!Array.isArray(this.state.employeeInvitations)) {
+        this.state.employeeInvitations = [];
+      }
+      this.state.users.push(newUser);
+      this.state.employeeInvitations.unshift(invitation);
+      this.addAudit(
+        actor,
+        "\u0625\u0636\u0627\u0641\u0629 \u0645\u0648\u0638\u0641 \u0648\u0625\u0631\u0633\u0627\u0644 \u062F\u0639\u0648\u0629 \u0627\u0646\u0636\u0645\u0627\u0645",
+        "EmployeeInvitation",
+        invId,
+        `\u0625\u0636\u0627\u0641\u0629 ${newUser.nameAr} (${newUser.roleLabelAr}) \u0628\u062D\u0627\u0644\u0629 \u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644 \u0648\u0625\u0635\u062F\u0627\u0631 \u062F\u0639\u0648\u0629 \u0639\u0628\u0631 ${channel}`,
+        { newValue: "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644", deviceName }
+      );
+      this.addNotification(
+        `\u062F\u0639\u0648\u0629 \u0645\u0648\u0638\u0641 \u062C\u062F\u064A\u062F: ${newUser.nameAr}`,
+        `New Employee Invite: ${newUser.nameEn}`,
+        `\u0623\u0635\u062F\u0631 ${actor.nameAr} \u062F\u0639\u0648\u0629 \u0627\u0646\u0636\u0645\u0627\u0645 \u0625\u0644\u0649 ${newUser.nameAr} (${newUser.roleLabelAr}).`,
+        `${actor.nameEn} invited ${newUser.nameEn}.`,
+        "\u0625\u062F\u0627\u0631\u064A\u0629",
+        ["sys_owner", "gm"],
+        "team"
+      );
+      this.persist();
+      return {
+        user: newUser,
+        invitation,
+        inviteUrl,
+        verificationCode,
+        handoffUrl: delivery.handoffUrl,
+        externalGatewayConfigured: delivery.externalGatewayConfigured,
+        deliveryNotice: delivery.deliveryNotice
+      };
+    });
+  }
+  resendEmployeeInvitation(actorUserId, invitationId, channel, originUrl, deviceName) {
+    return this.runTransaction(() => {
+      const actor = this.assertTeamManager(actorUserId);
+      const list = this.state.employeeInvitations || [];
+      const inv = list.find((item) => item.id === invitationId);
+      if (!inv) throw new Error("\u0627\u0644\u062F\u0639\u0648\u0629 \u0627\u0644\u0645\u062D\u062F\u062F\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
+      if (inv.status === "\u0645\u0642\u0628\u0648\u0644\u0629") {
+        throw new Error("\u062A\u0645 \u0642\u0628\u0648\u0644 \u0647\u0630\u0647 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0633\u0628\u0642\u0627\u064B");
+      }
+      const targetUser = this.state.users.find((u) => u.id === inv.userId);
+      if (!targetUser) throw new Error("\u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0645\u0631\u062A\u0628\u0637 \u0628\u0627\u0644\u062F\u0639\u0648\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      if (targetUser.accountStatus === "\u0645\u0631\u0641\u0648\u0636" || targetUser.accountStatus === "\u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0648\u0635\u0648\u0644") {
+        throw new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u0639\u0627\u062F\u0629 \u0625\u0631\u0633\u0627\u0644 \u062F\u0639\u0648\u0629 \u0644\u062D\u0633\u0627\u0628 \u0645\u0631\u0641\u0648\u0636 \u0623\u0648 \u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0648\u0635\u0648\u0644");
+      }
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1e3).toISOString();
+      const rawToken = crypto3.randomBytes(24).toString("hex");
+      const verificationCode = String(crypto3.randomInt(1e5, 1e6));
+      const nextChannel = channel || inv.channel || "copy_link";
+      const company = this.getCompanySummary();
+      this.sqlite.cancelInviteSecret(inv.id);
+      this.sqlite.createInviteSecret({
+        invitationId: inv.id,
+        userId: targetUser.id,
+        companyId: inv.companyId || this.getWorkspaceCompanyId(),
+        rawToken,
+        verificationCode,
+        expiresAt
+      });
+      const baseOrigin = (originUrl || "").replace(/\/+$/, "");
+      const inviteUrl = `${baseOrigin}/?inviteToken=${encodeURIComponent(rawToken)}&workspace=${encodeURIComponent(this.workspaceId)}`;
+      const delivery = this.buildInviteDeliveryNotice(
+        nextChannel,
+        targetUser.phone,
+        targetUser.email,
+        inviteUrl,
+        verificationCode,
+        company.nameAr
+      );
+      inv.channel = nextChannel;
+      inv.status = "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644";
+      inv.deliveryMode = delivery.externalGatewayConfigured ? "gateway" : "handoff";
+      inv.deliveryNote = delivery.deliveryNotice;
+      inv.tokenPreview = sha256Hex(rawToken).slice(0, 12);
+      inv.sentAt = now;
+      inv.expiresAt = expiresAt;
+      inv.canceledAt = void 0;
+      inv.resendCount = (inv.resendCount || 0) + 1;
+      this.addAudit(
+        actor,
+        "\u0625\u0639\u0627\u062F\u0629 \u0625\u0631\u0633\u0627\u0644 \u062F\u0639\u0648\u0629 \u0645\u0648\u0638\u0641",
+        "EmployeeInvitation",
+        inv.id,
+        `\u0625\u0639\u0627\u062F\u0629 \u0625\u0631\u0633\u0627\u0644 \u062F\u0639\u0648\u0629 \u0627\u0644\u0645\u0648\u0638\u0641 ${targetUser.nameAr} \u0639\u0628\u0631 ${nextChannel} (\u0627\u0644\u0645\u0631\u0629 #${inv.resendCount})`,
+        { deviceName }
+      );
+      this.persist();
+      return {
+        invitation: inv,
+        inviteUrl,
+        verificationCode,
+        handoffUrl: delivery.handoffUrl,
+        externalGatewayConfigured: delivery.externalGatewayConfigured,
+        deliveryNotice: delivery.deliveryNotice
+      };
+    });
+  }
+  cancelEmployeeInvitation(actorUserId, invitationId, deviceName) {
+    return this.runTransaction(() => {
+      const actor = this.assertTeamManager(actorUserId);
+      const list = this.state.employeeInvitations || [];
+      const inv = list.find((item) => item.id === invitationId);
+      if (!inv) throw new Error("\u0627\u0644\u062F\u0639\u0648\u0629 \u0627\u0644\u0645\u062D\u062F\u062F\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
+      if (inv.status === "\u0645\u0642\u0628\u0648\u0644\u0629") {
+        throw new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u0644\u063A\u0627\u0621 \u062F\u0639\u0648\u0629 \u062A\u0645 \u0642\u0628\u0648\u0644\u0647\u0627 \u0648\u062A\u0641\u0639\u064A\u0644\u0647\u0627 \u0628\u0627\u0644\u0641\u0639\u0644");
+      }
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      this.sqlite.cancelInviteSecret(inv.id);
+      inv.status = "\u0645\u0644\u063A\u0627\u0629";
+      inv.canceledAt = now;
+      this.addAudit(
+        actor,
+        "\u0625\u0644\u063A\u0627\u0621 \u062F\u0639\u0648\u0629 \u0645\u0648\u0638\u0641",
+        "EmployeeInvitation",
+        inv.id,
+        `\u0625\u0644\u063A\u0627\u0621 \u062F\u0639\u0648\u0629 \u0627\u0644\u0627\u0646\u0636\u0645\u0627\u0645 \u0627\u0644\u0645\u0648\u062C\u0647\u0629 \u0625\u0644\u0649 ${inv.fullName}`,
+        { oldValue: "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644", newValue: "\u0645\u0644\u063A\u0627\u0629", deviceName }
+      );
+      this.persist();
+      return inv;
+    });
+  }
+  getPublicInvitationByToken(rawToken) {
+    const company = this.getCompanySummary();
+    const secret = this.sqlite.findInviteSecretByToken(rawToken);
+    if (!secret) {
+      return { valid: false, reason: "\u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D \u0623\u0648 \u0645\u0646\u062A\u0647\u064A", company };
+    }
+    const workspaceCompanyId = this.getWorkspaceCompanyId();
+    if (secret.companyId !== workspaceCompanyId) {
+      return { valid: false, reason: "\u0647\u0630\u0647 \u0627\u0644\u062F\u0639\u0648\u0629 \u062A\u062E\u0635 \u0634\u0631\u0643\u0629 \u0623\u062E\u0631\u0649 \u0648\u0644\u0627 \u062A\u0646\u062A\u0645\u064A \u0644\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u062D\u0627\u0644\u064A\u0629", company };
+    }
+    const inv = (this.state.employeeInvitations || []).find((i) => i.id === secret.invitationId);
+    const user = this.state.users.find((u) => u.id === secret.userId);
+    if (!inv || !user) {
+      return { valid: false, reason: "\u0645\u0644\u0641 \u0627\u0644\u062F\u0639\u0648\u0629 \u0623\u0648 \u0627\u0644\u0645\u0648\u0638\u0641 \u0644\u0645 \u064A\u0639\u062F \u0645\u0648\u062C\u0648\u062F\u0627\u064B", company };
+    }
+    if (secret.canceledAt || inv.status === "\u0645\u0644\u063A\u0627\u0629") {
+      return { valid: false, reason: "\u062A\u0645 \u0625\u0644\u063A\u0627\u0621 \u0647\u0630\u0647 \u0627\u0644\u062F\u0639\u0648\u0629 \u0645\u0646 \u0642\u0650\u0628\u0644 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629", invitation: inv, company };
+    }
+    if (secret.usedAt || inv.status === "\u0645\u0642\u0628\u0648\u0644\u0629") {
+      return { valid: false, reason: "\u062A\u0645 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 \u0647\u0630\u0647 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0633\u0628\u0642\u0627\u064B", invitation: inv, company };
+    }
+    if (Date.now() > new Date(secret.expiresAt).getTime()) {
+      inv.status = "\u0645\u0646\u062A\u0647\u064A\u0629";
+      this.persist();
+      return {
+        valid: false,
+        expired: true,
+        reason: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u2014 \u0627\u0637\u0644\u0628 \u0645\u0646 \u0645\u0627\u0644\u0643 \u0627\u0644\u0634\u0631\u0643\u0629 \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644",
+        invitation: inv,
+        company
+      };
+    }
+    if (user.accountStatus === "\u0645\u0631\u0641\u0648\u0636" || user.accountStatus === "\u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0648\u0635\u0648\u0644") {
+      return { valid: false, reason: "\u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0631\u0641\u0648\u0636 \u0623\u0648 \u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0648\u0635\u0648\u0644", invitation: inv, company };
+    }
+    return {
+      valid: true,
+      invitation: inv,
+      company,
+      invitee: {
+        nameAr: user.nameAr,
+        nameEn: user.nameEn,
+        email: user.email,
+        phone: user.phone,
+        username: user.username,
+        jobTitle: user.jobTitle,
+        department: user.department,
+        roleLabelAr: user.roleLabelAr,
+        roleLabelEn: user.roleLabelEn
+      }
+    };
+  }
+  acceptEmployeeInvitation(rawToken, input) {
+    return this.runTransaction(() => {
+      if (!input.acceptedTerms) {
+        throw new Error("\u064A\u062C\u0628 \u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0639\u0644\u0649 \u0634\u0631\u0648\u0637 \u0627\u0644\u0627\u0633\u062A\u062E\u062F\u0627\u0645 \u0648\u0633\u064A\u0627\u0633\u0629 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0644\u0625\u062A\u0645\u0627\u0645 \u0627\u0644\u062A\u0641\u0639\u064A\u0644");
+      }
+      if (!input.verificationCode?.trim()) {
+        throw new Error("\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0645\u0643\u0648\u0646 \u0645\u0646 6 \u0623\u0631\u0642\u0627\u0645");
+      }
+      if (!input.password || input.password.length < 8) {
+        throw new Error("\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u064A\u062C\u0628 \u0623\u0646 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641");
+      }
+      if (input.password !== input.confirmPassword) {
+        throw new Error("\u0643\u0644\u0645\u062A\u0627 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0645\u062A\u0637\u0627\u0628\u0642\u062A\u064A\u0646");
+      }
+      if (input.pin && !/^\d{4,6}$/.test(input.pin)) {
+        throw new Error("\u0631\u0645\u0632 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 (PIN) \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0643\u0648\u0646 \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645");
+      }
+      const secretCheck = this.sqlite.findInviteSecretByToken(rawToken);
+      if (!secretCheck) {
+        throw new Error("\u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D");
+      }
+      if (secretCheck.companyId !== this.getWorkspaceCompanyId()) {
+        throw new PermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646 \u0642\u0628\u0648\u0644 \u062F\u0639\u0648\u0629 \u062A\u062E\u0635 \u0634\u0631\u0643\u0629 \u0623\u062E\u0631\u0649");
+      }
+      const consumed = this.sqlite.verifyAndConsumeInviteSecret(rawToken, input.verificationCode);
+      if (!consumed.ok) {
+        if (consumed.expired) {
+          const expInv = (this.state.employeeInvitations || []).find((i) => i.id === secretCheck.invitationId);
+          if (expInv && expInv.status === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644") {
+            expInv.status = "\u0645\u0646\u062A\u0647\u064A\u0629";
+            this.persist();
+          }
+        }
+        throw new Error(consumed.reason);
+      }
+      const user = this.state.users.find((u) => u.id === consumed.record.userId);
+      const inv = (this.state.employeeInvitations || []).find((i) => i.id === consumed.record.invitationId);
+      if (!user || !inv) {
+        throw new Error("\u0645\u0644\u0641 \u0627\u0644\u0645\u0648\u0638\u0641 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      }
+      this.sqlite.updateUserCredentials(user.id, {
+        password: input.password,
+        pin: input.pin || void 0
+      });
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      user.active = true;
+      user.accountStatus = "\u0646\u0634\u0637";
+      user.joinedAt = now;
+      user.lastActiveAt = now;
+      user.deviceName = input.deviceName || "\u0645\u062A\u0635\u0641\u062D \u0627\u0644\u0648\u064A\u0628 \xB7 \u0645\u0641\u0639\u0651\u0644 \u0639\u0628\u0631 \u0627\u0644\u062F\u0639\u0648\u0629";
+      user.statusState = "\u0645\u062A\u0635\u0644";
+      user.lastActivitySummary = "\u062A\u0645 \u0642\u0628\u0648\u0644 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u0634\u062E\u0635\u064A";
+      user.security = {
+        ...user.security || {},
+        hasPin: Boolean(input.pin),
+        failedAttempts: 0,
+        lockedUntil: void 0,
+        lastPasswordChangedAt: now,
+        tempPasswordSet: false
+      };
+      inv.status = "\u0645\u0642\u0628\u0648\u0644\u0629";
+      inv.acceptedAt = now;
+      this.addAudit(
+        user,
+        "\u062A\u0641\u0639\u064A\u0644 \u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641 \u0639\u0628\u0631 \u0627\u0644\u062F\u0639\u0648\u0629",
+        "EmployeeInvitation",
+        inv.id,
+        `\u0642\u0627\u0645 \u0627\u0644\u0645\u0648\u0638\u0641 ${user.nameAr} \u0628\u062A\u0641\u0639\u064A\u0644 \u062D\u0633\u0627\u0628\u0647 \u0648\u0642\u0628\u0648\u0644 \u0634\u0631\u0648\u0637 \u0627\u0644\u0634\u0631\u0643\u0629 (${inv.roleLabelAr})`,
+        { oldValue: "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644", newValue: "\u0646\u0634\u0637", deviceName: input.deviceName }
+      );
+      this.addNotification(
+        `\u0627\u0646\u0636\u0645\u0627\u0645 \u0645\u0648\u0638\u0641 \u0645\u0641\u0639\u0651\u0644: ${user.nameAr}`,
+        `Employee Activated: ${user.nameEn}`,
+        `\u0623\u062A\u0645 ${user.nameAr} (${user.roleLabelAr}) \u062A\u0641\u0639\u064A\u0644 \u062D\u0633\u0627\u0628\u0647 \u0639\u0628\u0631 \u0631\u0627\u0628\u0637 \u0627\u0644\u062F\u0639\u0648\u0629 \u0648\u0623\u0635\u0628\u062D \u0646\u0634\u0637\u0627\u064B \u0627\u0644\u0622\u0646.`,
+        `${user.nameEn} activated their account.`,
+        "\u0625\u062F\u0627\u0631\u064A\u0629",
+        ["sys_owner", "gm"],
+        "team"
+      );
+      this.persist();
+      return { user, company: this.getCompanySummary() };
+    });
+  }
+  updateEmployeeAdmin(actorUserId, targetUserId, patch, deviceName) {
+    return this.runTransaction(() => {
+      const actor = this.assertTeamManager(actorUserId);
+      const target = this.state.users.find((u) => u.id === targetUserId);
+      if (!target) throw new Error("\u0627\u0644\u0645\u0648\u0638\u0641 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      const touchesGovernance = patch.role !== void 0 || patch.customRoleId !== void 0 || patch.customModulePermissions !== void 0 || patch.allowedPropertyIds !== void 0 || patch.approvalLimitSar !== void 0 || patch.accountStatus !== void 0;
+      if (actor.id === targetUserId && touchesGovernance) {
+        throw new PermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646 \u0644\u0623\u064A \u0645\u0633\u062A\u062E\u062F\u0645 \u062A\u0639\u062F\u064A\u0644 \u062F\u0648\u0631\u0647 \u0623\u0648 \u0635\u0644\u0627\u062D\u064A\u0627\u062A\u0647 \u0623\u0648 \u062D\u0627\u0644\u0629 \u062D\u0633\u0627\u0628\u0647 \u0628\u0646\u0641\u0633\u0647");
+      }
+      if (actor.role === "gm" && (target.role === "sys_owner" || target.role === "gm")) {
+        throw new PermissionDeniedError("\u0644\u0627 \u064A\u0645\u0644\u0643 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u0639\u062F\u064A\u0644 \u062D\u0633\u0627\u0628 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0634\u0631\u0643\u0629 \u0622\u062E\u0631");
+      }
+      if (actor.role === "gm" && (patch.role === "sys_owner" || patch.role === "gm")) {
+        throw new PermissionDeniedError("\u062A\u0631\u0642\u064A\u0629 \u0645\u0648\u0638\u0641 \u0625\u0644\u0649 \u0645\u0627\u0644\u0643 \u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0639\u0627\u0645 \u0645\u062D\u0635\u0648\u0631\u0629 \u0628\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0641\u0642\u0637");
+      }
+      if (patch.email !== void 0) {
+        const normEmail = patch.email.trim().toLowerCase();
+        if (!normEmail) throw new Error("\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D");
+        if (this.state.users.some((u) => u.id !== targetUserId && u.email.toLowerCase() === normEmail)) {
+          throw new Error("\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0645\u0633\u062A\u062E\u062F\u0645 \u0644\u062D\u0633\u0627\u0628 \u0622\u062E\u0631");
+        }
+        target.email = normEmail;
+      }
+      if (patch.phone !== void 0) {
+        const normPhone = patch.phone.trim();
+        if (!normPhone) throw new Error("\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0627\u0644\u0623\u0633\u0627\u0633\u064A \u0645\u0637\u0644\u0648\u0628");
+        if (this.state.users.some((u) => u.id !== targetUserId && u.phone === normPhone)) {
+          throw new Error("\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0645\u0633\u062C\u0644 \u0644\u0645\u0648\u0638\u0641 \u0622\u062E\u0631");
+        }
+        target.phone = normPhone;
+      }
+      if (patch.username !== void 0) {
+        const normUser = patch.username.trim().toLowerCase();
+        if (normUser && this.state.users.some((u) => u.id !== targetUserId && u.username?.toLowerCase() === normUser)) {
+          throw new Error("\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644");
+        }
+        target.username = normUser || void 0;
+      }
+      if (patch.nameAr !== void 0 && patch.nameAr.trim()) target.nameAr = patch.nameAr.trim();
+      if (patch.nameEn !== void 0) target.nameEn = patch.nameEn.trim() || target.nameAr;
+      if (patch.jobTitle !== void 0) target.jobTitle = patch.jobTitle.trim();
+      if (patch.department !== void 0) target.department = patch.department.trim();
+      if (patch.secondaryPhone !== void 0) target.secondaryPhone = patch.secondaryPhone.trim() || void 0;
+      if (patch.avatarDataUrl !== void 0) target.avatarDataUrl = patch.avatarDataUrl || void 0;
+      if (patch.approvalLimitSar !== void 0) target.approvalLimitSar = Number(patch.approvalLimitSar || 0);
+      if (patch.allowedPropertyIds !== void 0) {
+        target.allowedPropertyIds = patch.allowedPropertyIds && patch.allowedPropertyIds.length > 0 ? patch.allowedPropertyIds : void 0;
+      }
+      if (patch.customModulePermissions !== void 0) {
+        target.customModulePermissions = patch.customModulePermissions || void 0;
+      }
+      if (patch.customRoleId !== void 0) {
+        if (patch.customRoleId === null || patch.customRoleId === "") {
+          target.customRoleId = void 0;
+        } else {
+          const custom = (this.state.customRoles || []).find((r) => r.id === patch.customRoleId);
+          if (!custom) throw new Error("\u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+          target.customRoleId = custom.id;
+          target.role = custom.baseRoleKey;
+          target.roleLabelAr = custom.nameAr;
+          target.roleLabelEn = custom.nameEn;
+        }
+      }
+      if (patch.role !== void 0 && patch.role !== target.role) {
+        target.role = patch.role;
+        const meta = this.resolveRoleMeta(patch.role, target.customRoleId);
+        target.roleLabelAr = meta.roleLabelAr;
+        target.roleLabelEn = meta.roleLabelEn;
+      } else if (patch.role !== void 0 && !patch.customRoleId && target.customRoleId === void 0) {
+        const meta = this.resolveRoleMeta(target.role, void 0);
+        target.roleLabelAr = meta.roleLabelAr;
+        target.roleLabelEn = meta.roleLabelEn;
+      }
+      let terminateSessions = false;
+      const prevStatus = target.accountStatus || (target.active ? "\u0646\u0634\u0637" : "\u0645\u0648\u0642\u0648\u0641");
+      if (patch.accountStatus !== void 0) {
+        if (target.role === "sys_owner" && patch.accountStatus !== "\u0646\u0634\u0637") {
+          const activeOwners = this.state.users.filter(
+            (u) => u.id !== target.id && u.role === "sys_owner" && u.active && (!u.accountStatus || u.accountStatus === "\u0646\u0634\u0637")
+          );
+          if (activeOwners.length === 0) {
+            throw new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u0625\u064A\u0642\u0627\u0641 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0627\u0644\u0648\u062D\u064A\u062F \u0627\u0644\u0646\u0634\u0637 \u0641\u064A \u0627\u0644\u0634\u0631\u0643\u0629");
+          }
+        }
+        target.accountStatus = patch.accountStatus;
+        if (patch.accountStatus === "\u0646\u0634\u0637") {
+          target.active = true;
+          target.terminatedAt = void 0;
+          target.terminationReason = void 0;
+          if (!target.joinedAt) target.joinedAt = (/* @__PURE__ */ new Date()).toISOString();
+        } else {
+          target.active = false;
+          target.statusState = "\u063A\u064A\u0631 \u0645\u062A\u0635\u0644";
+          if (patch.accountStatus === "\u0645\u0648\u0642\u0648\u0641" || patch.accountStatus === "\u0645\u0631\u0641\u0648\u0636" || patch.accountStatus === "\u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0648\u0635\u0648\u0644") {
+            target.terminatedAt = (/* @__PURE__ */ new Date()).toISOString();
+            target.terminationReason = patch.terminationReason?.trim() || void 0;
+            this.sqlite.revokeOtherSessionsForUser(target.id);
+            terminateSessions = true;
+            if (patch.accountStatus === "\u0645\u0631\u0641\u0648\u0636" || patch.accountStatus === "\u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0648\u0635\u0648\u0644") {
+              for (const inv of this.state.employeeInvitations || []) {
+                if (inv.userId === target.id && inv.status === "\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644") {
+                  this.sqlite.cancelInviteSecret(inv.id);
+                  inv.status = "\u0645\u0644\u063A\u0627\u0629";
+                  inv.canceledAt = (/* @__PURE__ */ new Date()).toISOString();
+                }
+              }
+            }
+          }
+        }
+      }
+      this.addAudit(
+        actor,
+        "\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u0641 \u0648\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0645\u0648\u0638\u0641",
+        "StaffUser",
+        target.id,
+        `\u062A\u0639\u062F\u064A\u0644 \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0648\u0638\u0641 ${target.nameAr} (${target.roleLabelAr})${patch.accountStatus && patch.accountStatus !== prevStatus ? ` \xB7 \u0627\u0644\u062D\u0627\u0644\u0629: ${prevStatus} \u2190 ${patch.accountStatus}` : ""}`,
+        { oldValue: prevStatus, newValue: target.accountStatus, reason: patch.terminationReason, deviceName }
+      );
+      this.persist();
+      return { user: target, terminateSessions };
+    });
+  }
+  createCustomRole(actorUserId, input, deviceName) {
+    const actor = this.assertTeamManager(actorUserId);
+    if (!input.nameAr?.trim()) throw new Error("\u0627\u0633\u0645 \u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0648\u0638\u064A\u0641\u064A \u0627\u0644\u0645\u062E\u0635\u0635 \u0645\u0637\u0644\u0648\u0628");
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const baseRoleKey = input.baseRole && input.baseRole !== "sys_owner" ? input.baseRole : "leasing";
+    const modulePermissions = input.modulePermissions || getDefaultModulePermissionsForRole(baseRoleKey);
+    const roleDef = {
+      id: uid("crole"),
+      companyId: this.getWorkspaceCompanyId(),
+      nameAr: input.nameAr.trim(),
+      nameEn: (input.nameEn || input.nameAr).trim(),
+      descriptionAr: input.descriptionAr?.trim() || "",
+      baseRoleKey,
+      legacyPermissions: deriveLegacyPermissionsFromModules(modulePermissions),
+      modulePermissions,
+      createdBy: actor.nameAr,
+      createdAt: now,
+      updatedAt: now
+    };
+    if (!Array.isArray(this.state.customRoles)) this.state.customRoles = [];
+    this.state.customRoles.push(roleDef);
+    this.addAudit(
+      actor,
+      "\u0625\u0646\u0634\u0627\u0621 \u062F\u0648\u0631 \u0648\u0638\u064A\u0641\u064A \u0645\u062E\u0635\u0635",
+      "CustomRole",
+      roleDef.id,
+      `\u0625\u0646\u0634\u0627\u0621 \u062F\u0648\u0631 \u0645\u062E\u0635\u0635 (${roleDef.nameAr}) \u0628\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u062A\u0641\u0635\u064A\u0644\u064A\u0629 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0633\u0627\u0645`,
+      { deviceName }
+    );
+    this.persist();
+    return roleDef;
+  }
+  updateCustomRole(actorUserId, roleId, patch, deviceName) {
+    const actor = this.assertTeamManager(actorUserId);
+    const list = this.state.customRoles || [];
+    const roleDef = list.find((r) => r.id === roleId);
+    if (!roleDef) throw new Error("\u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    if (patch.nameAr?.trim()) roleDef.nameAr = patch.nameAr.trim();
+    if (patch.nameEn?.trim()) roleDef.nameEn = patch.nameEn.trim();
+    if (patch.descriptionAr !== void 0) roleDef.descriptionAr = patch.descriptionAr.trim();
+    if (patch.modulePermissions !== void 0) {
+      roleDef.modulePermissions = patch.modulePermissions;
+      roleDef.legacyPermissions = deriveLegacyPermissionsFromModules(patch.modulePermissions);
+    }
+    roleDef.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    for (const u of this.state.users) {
+      if (u.customRoleId === roleId) {
+        u.roleLabelAr = roleDef.nameAr;
+        u.roleLabelEn = roleDef.nameEn;
+      }
+    }
+    this.addAudit(
+      actor,
+      "\u062A\u0639\u062F\u064A\u0644 \u062F\u0648\u0631 \u0648\u0638\u064A\u0641\u064A \u0645\u062E\u0635\u0635",
+      "CustomRole",
+      roleId,
+      `\u062A\u062D\u062F\u064A\u062B \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0623\u0648 \u0645\u0633\u0645\u0649 \u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635 (${roleDef.nameAr})`,
+      { deviceName }
+    );
+    this.persist();
+    return roleDef;
+  }
+  deleteCustomRole(actorUserId, roleId, deviceName) {
+    const actor = this.assertTeamManager(actorUserId);
+    const list = this.state.customRoles || [];
+    const roleDef = list.find((r) => r.id === roleId);
+    if (!roleDef) throw new Error("\u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+    const assigned = this.state.users.filter((u) => u.customRoleId === roleId);
+    if (assigned.length > 0) {
+      throw new Error(`\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0627\u0644\u062F\u0648\u0631 \u0644\u0623\u0646\u0647 \u0645\u0633\u0646\u062F \u062D\u0627\u0644\u064A\u0627\u064B \u0625\u0644\u0649 ${assigned.length} \u0645\u0648\u0638\u0641\u064A\u0646 \u2014 \u063A\u064A\u0651\u0631 \u0623\u062F\u0648\u0627\u0631\u0647\u0645 \u0623\u0648\u0644\u0627\u064B`);
+    }
+    this.state.customRoles = list.filter((r) => r.id !== roleId);
+    this.addAudit(
+      actor,
+      "\u062D\u0630\u0641 \u062F\u0648\u0631 \u0648\u0638\u064A\u0641\u064A \u0645\u062E\u0635\u0635",
+      "CustomRole",
+      roleId,
+      `\u062D\u0630\u0641 \u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635 (${roleDef.nameAr})`,
+      { deviceName }
+    );
+    this.persist();
+    return { deletedId: roleId };
+  }
+  updateRoleModuleMatrix(actorUserId, role, modulePermissions, deviceName) {
+    const actor = this.assertTeamManager(actorUserId);
+    if (actor.role === role) {
+      throw new PermissionDeniedError("\u0644\u0627 \u064A\u0645\u0643\u0646 \u0644\u0623\u064A \u0645\u0633\u062A\u062E\u062F\u0645 \u062A\u0639\u062F\u064A\u0644 \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u062F\u0648\u0631\u0647 \u0627\u0644\u062D\u0627\u0644\u064A");
+    }
+    if (actor.role === "gm" && (role === "sys_owner" || role === "gm")) {
+      throw new PermissionDeniedError("\u062A\u0639\u062F\u064A\u0644 \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0645\u062F\u064A\u0631 \u0627\u0644\u0634\u0631\u0643\u0629 \u062D\u0635\u0631\u064A \u0644\u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+    }
+    if (role === "sys_owner") {
+      const teamPerms = modulePermissions.team || [];
+      if (!teamPerms.includes("manage") || !teamPerms.includes("view")) {
+        throw new Error("\u0644\u0627 \u064A\u0645\u0643\u0646 \u0633\u062D\u0628 \u0635\u0644\u0627\u062D\u064A\u0629 \u0625\u062F\u0627\u0631\u0629 \u0627\u0644\u0641\u0631\u064A\u0642 \u0645\u0646 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
+      }
+    }
+    if (!this.state.roleModulePermissions) {
+      this.state.roleModulePermissions = buildAllDefaultRoleModulePermissions();
+    }
+    this.state.roleModulePermissions[role] = modulePermissions;
+    this.state.rolePermissions[role] = deriveLegacyPermissionsFromModules(modulePermissions);
+    this.addAudit(
+      actor,
+      "\u062A\u062D\u062F\u064A\u062B \u0645\u0635\u0641\u0648\u0641\u0629 \u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0627\u0644\u0623\u0642\u0633\u0627\u0645",
+      "RoleModuleMatrix",
+      role,
+      `\u062A\u062D\u062F\u064A\u062B \u0645\u0635\u0641\u0648\u0641\u0629 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0627\u0644\u062A\u0641\u0635\u064A\u0644\u064A\u0629 \u0644\u0644\u062F\u0648\u0631 (${role})`,
+      { deviceName }
+    );
+    this.persist();
+    return {
+      roleModulePermissions: this.state.roleModulePermissions,
+      rolePermissions: this.state.rolePermissions
+    };
+  }
+  updateOwnProfile(userId, patch, deviceName) {
+    const user = this.getActingUser(userId);
+    const forbiddenFields = [
+      "role",
+      "roleLabelAr",
+      "roleLabelEn",
+      "customRoleId",
+      "customModulePermissions",
+      "allowedPropertyIds",
+      "accountStatus",
+      "active",
+      "approvalLimitSar",
+      "companyId",
+      "permissions"
+    ];
+    for (const key of forbiddenFields) {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) {
+        throw new PermissionDeniedError("\u0644\u0627 \u062A\u0645\u0644\u0643 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0648\u0638\u064A\u0641\u064A \u0623\u0648 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0645\u0646 \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0634\u062E\u0635\u064A");
+      }
+    }
+    if (typeof patch.nameAr === "string" && patch.nameAr.trim()) {
+      user.nameAr = patch.nameAr.trim();
+    }
+    if (typeof patch.nameEn === "string") {
+      user.nameEn = patch.nameEn.trim() || user.nameAr;
+    }
+    if (typeof patch.secondaryPhone === "string") {
+      user.secondaryPhone = patch.secondaryPhone.trim() || void 0;
+    }
+    if (typeof patch.username === "string") {
+      const normUsername = patch.username.trim().toLowerCase();
+      if (normUsername && this.state.users.some((u) => u.id !== user.id && u.username?.toLowerCase() === normUsername)) {
+        throw new Error("\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644 \u0645\u0646 \u0642\u0650\u0628\u0644 \u0645\u0648\u0638\u0641 \u0622\u062E\u0631");
+      }
+      user.username = normUsername || void 0;
+    }
+    if (typeof patch.avatarDataUrl === "string" || patch.avatarDataUrl === null) {
+      user.avatarDataUrl = typeof patch.avatarDataUrl === "string" && patch.avatarDataUrl ? patch.avatarDataUrl : void 0;
+    }
+    if (patch.notificationPrefs && typeof patch.notificationPrefs === "object") {
+      user.notificationPrefs = {
+        ...user.notificationPrefs || {
+          dndEnabled: false,
+          taskAssigned: true,
+          taskReminder: true,
+          taskApproved: true,
+          taskComment: true,
+          urgentTicket: true
+        },
+        ...patch.notificationPrefs
+      };
+    }
+    this.addAudit(
+      user,
+      "\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0634\u062E\u0635\u064A",
+      "StaffUserProfile",
+      user.id,
+      `\u062D\u062F\u0651\u062B ${user.nameAr} \u0628\u064A\u0627\u0646\u0627\u062A \u0645\u0644\u0641\u0647 \u0627\u0644\u0634\u062E\u0635\u064A`,
+      { deviceName }
+    );
+    this.persist();
+    return user;
+  }
+  requestContactVerification(userId, type, newValue, deviceName) {
+    const user = this.getActingUser(userId);
+    const trimmed = (newValue || "").trim();
+    if (!trimmed) {
+      throw new Error(type === "email" ? "\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0627\u0644\u062C\u062F\u064A\u062F" : "\u064A\u0631\u062C\u0649 \u0625\u062F\u062E\u0627\u0644 \u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0627\u0644\u062C\u062F\u064A\u062F");
+    }
+    const normalized = type === "email" ? trimmed.toLowerCase() : trimmed;
+    if (type === "email") {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+        throw new Error("\u0635\u064A\u063A\u0629 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629");
+      }
+      if (this.state.users.some((u) => u.id !== user.id && u.email.toLowerCase() === normalized)) {
+        throw new Error("\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A \u0645\u0633\u062A\u062E\u062F\u0645 \u0644\u062D\u0633\u0627\u0628 \u0622\u062E\u0631");
+      }
+    } else {
+      if (this.state.users.some((u) => u.id !== user.id && u.phone === normalized)) {
+        throw new Error("\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644 \u0645\u0633\u062C\u0644 \u0644\u0645\u0648\u0638\u0641 \u0622\u062E\u0631");
+      }
+    }
+    const code = String(crypto3.randomInt(1e5, 1e6));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1e3).toISOString();
+    const purpose = type === "email" ? "verify_email" : "verify_phone";
+    this.sqlite.createRecoveryToken({
+      id: uid("vrf"),
+      userId: user.id,
+      purpose,
+      targetValue: normalized,
+      code,
+      expiresAt
+    });
+    if (type === "email") {
+      user.pendingEmailVerification = { targetValue: normalized, requestedAt: (/* @__PURE__ */ new Date()).toISOString(), expiresAt };
+    } else {
+      user.pendingPhoneVerification = { targetValue: normalized, requestedAt: (/* @__PURE__ */ new Date()).toISOString(), expiresAt };
+    }
+    this.addAudit(
+      user,
+      type === "email" ? "\u0637\u0644\u0628 \u062A\u062D\u0642\u0642 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A" : "\u0637\u0644\u0628 \u062A\u062D\u0642\u0642 \u062A\u063A\u064A\u064A\u0631 \u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644",
+      "ContactVerification",
+      user.id,
+      `\u0637\u0644\u0628 \u0631\u0645\u0632 \u062A\u062D\u0642\u0642 \u0644\u062A\u062D\u062F\u064A\u062B ${type === "email" ? "\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A" : "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644"}`,
+      { deviceName }
+    );
+    this.persist();
+    const integrations = this.state.settings?.integrationsConfig;
+    const externalConfigured = type === "email" ? Boolean(integrations?.smtpEnabled) : Boolean(integrations?.smsGatewayEnabled);
+    const showLocalPreview = !externalConfigured && this.isLocalSimulationAllowed();
+    return {
+      ok: true,
+      pendingValue: normalized,
+      expiresAt,
+      externalGatewayConfigured: externalConfigured,
+      deliveryNotice: externalConfigured ? "\u062A\u0645 \u0625\u0631\u0633\u0627\u0644 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0639\u0628\u0631 \u0627\u0644\u0628\u0648\u0627\u0628\u0629 \u0627\u0644\u0645\u0631\u0628\u0648\u0637\u0629." : "\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u062D\u0644\u064A\u0627\u064B \u0644\u0639\u062F\u0645 \u062A\u0641\u0639\u064A\u0644 \u0628\u0648\u0627\u0628\u0629 \u0628\u0631\u064A\u062F/SMS \u062E\u0627\u0631\u062C\u064A\u0629 \u0641\u064A \u0647\u0630\u0647 \u0627\u0644\u0628\u064A\u0626\u0629.",
+      ...showLocalPreview ? { localSimulationCode: code } : {}
+    };
+  }
+  confirmContactVerification(userId, type, code, deviceName) {
+    return this.runTransaction(() => {
+      const user = this.getActingUser(userId);
+      const purpose = type === "email" ? "verify_email" : "verify_phone";
+      const verified = this.sqlite.verifyAndConsumeRecoveryToken(user.id, purpose, code || "");
+      if (!verified.ok) {
+        throw new Error(verified.reason);
+      }
+      const nextVal = verified.record.targetValue;
+      if (!nextVal) {
+        throw new Error("\u0627\u0644\u0642\u064A\u0645\u0629 \u0627\u0644\u0645\u0633\u062A\u0647\u062F\u0641\u0629 \u0644\u0644\u062A\u062D\u0642\u0642 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629");
+      }
+      const oldVal = type === "email" ? user.email : user.phone;
+      if (type === "email") {
+        user.email = nextVal;
+        user.pendingEmailVerification = void 0;
+      } else {
+        user.phone = nextVal;
+        user.pendingPhoneVerification = void 0;
+      }
+      this.addAudit(
+        user,
+        type === "email" ? "\u062A\u0623\u0643\u064A\u062F \u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A" : "\u062A\u0623\u0643\u064A\u062F \u062A\u062D\u062F\u064A\u062B \u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644",
+        "StaffUserProfile",
+        user.id,
+        `\u062A\u062D\u062F\u064A\u062B ${type === "email" ? "\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A" : "\u0631\u0642\u0645 \u0627\u0644\u062C\u0648\u0627\u0644"} \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u0642\u0642 \u0628\u0627\u0644\u0631\u0645\u0632`,
+        { oldValue: oldVal, newValue: nextVal, deviceName }
+      );
+      this.persist();
+      return user;
+    });
+  }
+  requestCredentialRecovery(emailOrIdentifier, purpose, deviceName) {
+    const clean = (emailOrIdentifier || "").trim().toLowerCase();
+    const integrations = this.state.settings?.integrationsConfig;
+    const externalConfigured = Boolean(integrations?.smtpEnabled);
+    const user = this.state.users.find(
+      (u) => u.email.toLowerCase() === clean || u.username && u.username.toLowerCase() === clean || u.phone === (emailOrIdentifier || "").trim()
+    );
+    const uniformMessage = "\u0625\u0630\u0627 \u0643\u0627\u0646 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0633\u062C\u0644\u0627\u064B \u0648\u0646\u0634\u0637\u0627\u064B\u060C \u0641\u0633\u064A\u062A\u0645 \u0625\u0631\u0633\u0627\u0644 \u0631\u0645\u0632 \u062A\u062D\u0642\u0642 \u0644\u0644\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0635\u0627\u0644\u062D \u0644\u0645\u062F\u0629 15 \u062F\u0642\u064A\u0642\u0629.";
+    if (!user || !user.active || user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") {
+      return {
+        ok: true,
+        message: uniformMessage,
+        externalGatewayConfigured: externalConfigured
+      };
+    }
+    const code = String(crypto3.randomInt(1e5, 1e6));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1e3).toISOString();
+    this.sqlite.createRecoveryToken({
+      id: uid("rec"),
+      userId: user.id,
+      purpose,
+      targetValue: user.email,
+      code,
+      expiresAt
+    });
+    this.addAudit(
+      user,
+      purpose === "password_reset" ? "\u0637\u0644\u0628 \u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" : "\u0637\u0644\u0628 \u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646 \u0631\u0645\u0632 PIN",
+      "CredentialRecovery",
+      user.id,
+      `\u0637\u0644\u0628 \u0631\u0645\u0632 \u0627\u0633\u062A\u0639\u0627\u062F\u0629 (${purpose})`,
+      { deviceName }
+    );
+    this.persist();
+    const showLocalPreview = !externalConfigured && this.isLocalSimulationAllowed();
+    return {
+      ok: true,
+      message: uniformMessage,
+      externalGatewayConfigured: externalConfigured,
+      ...showLocalPreview ? { localSimulationCode: code } : {}
+    };
+  }
+  completeCredentialRecovery(input, deviceName) {
+    return this.runTransaction(() => {
+      const clean = (input.emailOrIdentifier || "").trim().toLowerCase();
+      const user = this.state.users.find(
+        (u) => u.email.toLowerCase() === clean || u.username && u.username.toLowerCase() === clean || u.phone === (input.emailOrIdentifier || "").trim()
+      );
+      if (!user || !user.active || user.accountStatus && user.accountStatus !== "\u0646\u0634\u0637") {
+        throw new Error("\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D \u0623\u0648 \u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0629");
+      }
+      if (!input.newSecret || input.newSecret !== input.confirmSecret) {
+        throw new Error("\u0627\u0644\u0642\u064A\u0645\u0629 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0648\u062A\u0623\u0643\u064A\u062F\u0647\u0627 \u063A\u064A\u0631 \u0645\u062A\u0637\u0627\u0628\u0642\u062A\u064A\u0646");
+      }
+      if (input.purpose === "password_reset" && input.newSecret.length < 8) {
+        throw new Error("\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u064A\u062C\u0628 \u0623\u0646 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641");
+      }
+      if (input.purpose === "pin_reset" && !/^\d{4,6}$/.test(input.newSecret)) {
+        throw new Error("\u0631\u0645\u0632 PIN \u0627\u0644\u062C\u062F\u064A\u062F \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0643\u0648\u0646 \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645");
+      }
+      const verified = this.sqlite.verifyAndConsumeRecoveryToken(user.id, input.purpose, input.code || "");
+      if (!verified.ok) {
+        throw new Error(verified.reason);
+      }
+      if (input.purpose === "password_reset") {
+        this.sqlite.updateUserCredentials(user.id, { password: input.newSecret });
+      } else {
+        this.sqlite.updateUserCredentials(user.id, { pin: input.newSecret });
+      }
+      if (!user.security) user.security = {};
+      user.security.failedAttempts = 0;
+      user.security.lockedUntil = void 0;
+      user.security.lastPasswordChangedAt = (/* @__PURE__ */ new Date()).toISOString();
+      if (input.purpose === "pin_reset") {
+        user.security.hasPin = true;
+      }
+      let terminateSessions = false;
+      if (input.purpose === "password_reset") {
+        this.sqlite.revokeOtherSessionsForUser(user.id);
+        terminateSessions = true;
+      }
+      this.addAudit(
+        user,
+        input.purpose === "password_reset" ? "\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0628\u0646\u062C\u0627\u062D" : "\u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646 \u0631\u0645\u0632 PIN \u0628\u0646\u062C\u0627\u062D",
+        "CredentialRecovery",
+        user.id,
+        `\u062A\u0645\u062A \u0627\u0633\u062A\u0639\u0627\u062F\u0629 ${input.purpose === "password_reset" ? "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0648\u0625\u0644\u063A\u0627\u0621 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0633\u0627\u0628\u0642\u0629" : "\u0631\u0645\u0632 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 PIN"}`,
+        { deviceName }
+      );
+      if (input.purpose === "pin_reset") {
+        user.security.pinEnabled = true;
+        user.security.pinFailedAttempts = 0;
+        user.security.pinLockedUntil = void 0;
+        user.security.requirePasswordAfterPinLock = false;
+      }
+      this.persist();
+      return { ok: true, userId: user.id, terminateSessions };
+    });
+  }
+  togglePinEnabled(userId, enabled, currentPassword, newPin, deviceName) {
+    return this.runTransaction(() => {
+      const user = this.getActingUser(userId);
+      if (!currentPassword || !this.sqlite.verifyUserPassword(user.id, currentPassword)) {
+        throw new Error("\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u0645\u0637\u0644\u0648\u0628\u0629 \u0648\u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629 \u0644\u062A\u063A\u064A\u064A\u0631 \u062D\u0627\u0644\u0629 \u0631\u0645\u0632 PIN");
+      }
+      if (!user.security) user.security = {};
+      if (!enabled) {
+        this.sqlite.disableUserPin(user.id);
+        user.security.pinEnabled = false;
+        user.security.hasPin = false;
+        user.security.pinFailedAttempts = 0;
+        user.security.pinLockedUntil = void 0;
+        user.security.requirePasswordAfterPinLock = false;
+      } else {
+        const cleanPin = (newPin || "").trim();
+        if (cleanPin) {
+          if (!/^\d{4,6}$/.test(cleanPin)) {
+            throw new Error("\u0631\u0645\u0632 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 (PIN) \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0643\u0648\u0646 \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645");
+          }
+          this.sqlite.updateUserCredentials(user.id, { pin: cleanPin });
+          user.security.hasPin = true;
+        } else if (!this.sqlite.getCredentialStatus(user.id).hasPin) {
+          throw new Error("\u0623\u062F\u062E\u0644 \u0631\u0645\u0632 PIN \u062C\u062F\u064A\u062F \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645 \u0644\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639");
+        }
+        user.security.pinEnabled = true;
+        user.security.pinFailedAttempts = 0;
+        user.security.pinLockedUntil = void 0;
+        user.security.requirePasswordAfterPinLock = false;
+      }
+      this.addAudit(
+        user,
+        enabled ? "\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0631\u0645\u0632 PIN" : "\u062A\u0639\u0637\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0631\u0645\u0632 PIN",
+        "StaffSecurity",
+        user.id,
+        enabled ? "\u062A\u0641\u0639\u064A\u0644 \u0631\u0645\u0632 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 PIN \u0628\u0639\u062F \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" : "\u062A\u0639\u0637\u064A\u0644 \u0631\u0645\u0632 \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0633\u0631\u064A\u0639 PIN \u0648\u062D\u0630\u0641\u0647 \u0628\u0623\u0645\u0627\u0646",
+        { deviceName }
+      );
+      this.persist();
+      return user;
+    });
+  }
+  toggleTwoFactor(userId, enabled, currentPassword, deviceName) {
+    return this.runTransaction(() => {
+      const user = this.getActingUser(userId);
+      if (!currentPassword || !this.sqlite.verifyUserPassword(user.id, currentPassword)) {
+        throw new Error("\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629");
+      }
+      if (!user.security) user.security = {};
+      user.security.twoFactorEnabled = Boolean(enabled);
+      this.addAudit(
+        user,
+        enabled ? "\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0625\u0636\u0627\u0641\u064A \u0644\u0644\u0623\u062C\u0647\u0632\u0629 \u0627\u0644\u062C\u062F\u064A\u062F\u0629" : "\u062A\u0639\u0637\u064A\u0644 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0625\u0636\u0627\u0641\u064A \u0644\u0644\u0623\u062C\u0647\u0632\u0629 \u0627\u0644\u062C\u062F\u064A\u062F\u0629",
+        "StaffSecurity",
+        user.id,
+        enabled ? "\u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062A\u062D\u0642\u0642 \u062B\u0646\u0627\u0626\u064A \u0627\u0644\u062E\u0637\u0648\u0629 \u0639\u0628\u0631 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0645\u0648\u062B\u0642 \u0644\u0644\u0623\u062C\u0647\u0632\u0629 \u063A\u064A\u0631 \u0627\u0644\u0645\u0639\u0631\u0648\u0641\u0629" : "\u062A\u0639\u0637\u064A\u0644 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0625\u0636\u0627\u0641\u064A \u0639\u0646\u062F \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644",
+        { deviceName }
+      );
+      this.persist();
+      return user;
+    });
+  }
+  evaluateMfaRequirement(user, deviceId, options) {
+    const policyRequires = Boolean(this.state.securityPolicy?.requireMfaOnNewDevice);
+    const userRequires = Boolean(user.security?.twoFactorEnabled);
+    if (!policyRequires && !userRequires && !options?.suspiciousAttempt) {
+      return null;
+    }
+    if (deviceId && this.sqlite.isTrustedDevice(user.id, deviceId) && !options?.suspiciousAttempt) {
+      return null;
+    }
+    if (!deviceId && !userRequires && !policyRequires && !options?.suspiciousAttempt) {
+      return null;
+    }
+    if (options?.suspiciousAttempt) return "unusual_activity";
+    if ((policyRequires || userRequires) && deviceId && !this.sqlite.isTrustedDevice(user.id, deviceId)) {
+      return "new_device";
+    }
+    if (userRequires && !deviceId) {
+      return "new_device";
+    }
+    return null;
+  }
+  maskEmailAddress(email) {
+    const parts = (email || "").split("@");
+    if (parts.length !== 2) return "***";
+    const [local, domain] = parts;
+    const head = local.slice(0, Math.min(2, local.length));
+    return `${head}***@${domain}`;
+  }
+  createMfaChallenge(user, reason, deviceName) {
+    const code = String(crypto3.randomInt(1e5, 1e6));
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1e3).toISOString();
+    this.sqlite.createRecoveryToken({
+      id: uid("mfa"),
+      userId: user.id,
+      purpose: "mfa_challenge",
+      targetValue: user.email,
+      code,
+      expiresAt
+    });
+    const integrations = this.state.settings?.integrationsConfig;
+    const externalConfigured = Boolean(integrations?.smtpEnabled);
+    const showLocalPreview = !externalConfigured && this.isLocalSimulationAllowed();
+    this.addAudit(
+      user,
+      "\u0625\u0631\u0633\u0627\u0644 \u0631\u0645\u0632 \u062A\u062D\u0642\u0642 \u0625\u0636\u0627\u0641\u064A \u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644",
+      "MfaChallenge",
+      user.id,
+      `\u0637\u0644\u0628 \u062A\u062D\u0642\u0642 \u0625\u0636\u0627\u0641\u064A (${reason === "unusual_activity" ? "\u0646\u0634\u0627\u0637 \u063A\u064A\u0631 \u0645\u0639\u062A\u0627\u062F" : "\u062C\u0647\u0627\u0632 \u062C\u062F\u064A\u062F"})`,
+      { deviceName }
+    );
+    this.persist();
+    return {
+      maskedEmail: this.maskEmailAddress(user.email),
+      expiresAt,
+      externalGatewayConfigured: externalConfigured,
+      deliveryNotice: externalConfigured ? `\u062A\u0645 \u0625\u0631\u0633\u0627\u0644 \u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0645\u0624\u0642\u062A \u0625\u0644\u0649 \u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0645\u0648\u062B\u0642 ${this.maskEmailAddress(user.email)}.` : `\u062A\u0645 \u0625\u0646\u0634\u0627\u0621 \u0631\u0645\u0632 \u062A\u062D\u0642\u0642 \u0625\u0636\u0627\u0641\u064A \u0644\u0644\u0628\u0631\u064A\u062F ${this.maskEmailAddress(user.email)} (\u0628\u064A\u0626\u0629 \u0645\u062D\u0644\u064A\u0629 \u0628\u062F\u0648\u0646 SMTP).`,
+      ...showLocalPreview ? { localSimulationCode: code } : {}
+    };
+  }
+  verifyMfaChallenge(userId, code, opts) {
+    return this.runTransaction(() => {
+      const user = this.getActingUser(userId);
+      this.assertAccountLoginAllowed(user);
+      const verified = this.sqlite.verifyAndConsumeRecoveryToken(user.id, "mfa_challenge", code || "");
+      if (!verified.ok) {
+        this.recordLoginEvent({
+          userId: user.id,
+          deviceName: opts?.deviceName || user.deviceName,
+          method: "\u0645\u0635\u0627\u062F\u0642\u0629 \u062B\u0646\u0627\u0626\u064A\u0629 (2FA)",
+          success: false
+        });
+        this.persist();
+        throw new Error(verified.reason);
+      }
+      if (opts?.trustDevice && opts?.deviceId) {
+        this.sqlite.registerOrTouchTrustedDevice(
+          user.id,
+          opts.deviceId,
+          opts.deviceName || user.deviceName,
+          opts.appType === "desktop" ? "desktop" : "web"
+        );
+      }
+      this.recordLoginEvent({
+        userId: user.id,
+        deviceName: opts?.deviceName || user.deviceName,
+        method: "\u0645\u0635\u0627\u062F\u0642\u0629 \u062B\u0646\u0627\u0626\u064A\u0629 (2FA)",
+        success: true
+      });
+      this.addAudit(
+        user,
+        "\u0627\u062C\u062A\u064A\u0627\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0625\u0636\u0627\u0641\u064A \u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644",
+        "MfaChallenge",
+        user.id,
+        opts?.trustDevice ? "\u062A\u0645 \u0627\u0644\u062A\u062D\u0642\u0642 \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u062C\u0647\u0627\u0632 \u0643\u062C\u0647\u0627\u0632 \u0645\u0648\u062B\u0648\u0642" : "\u062A\u0645 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u062C\u0644\u0633\u0629 \u0628\u0646\u062C\u0627\u062D",
+        { deviceName: opts?.deviceName }
+      );
+      this.persist();
+      return user;
+    });
+  }
+  getAuthMePayload(userId) {
+    const user = this.getActingUser(userId);
+    const effectiveModulePermissions = getEffectiveModulePermissions(this.state, user);
+    const rolePermissions = this.state.rolePermissions?.[user.role] || [];
+    const company = this.state.companies?.[0];
+    return {
+      user: this.sanitizeUsersForActor(user).find((u) => u.id === user.id) || user,
+      workspaceId: this.workspaceId,
+      company: {
+        id: company?.id || `comp-${this.workspaceId}`,
+        nameAr: this.state.settings?.nameAr || company?.nameAr || "AqarPlus",
+        nameEn: this.state.settings?.nameEn || company?.nameEn || "AqarPlus",
+        logoDataUrl: this.state.settings?.logoDataUrl
+      },
+      rolePermissions,
+      modulePermissions: effectiveModulePermissions
     };
   }
 };
@@ -7686,8 +10672,349 @@ async function extractDocumentDataWithGemini(input) {
   };
 }
 
+// server/syncDispatcher.ts
+function dispatchSyncOperation(store2, input) {
+  const { method, userId, deviceName } = input;
+  const body = input.body && typeof input.body === "object" ? input.body : {};
+  const endpoint = input.endpoint.split("?")[0].trim();
+  try {
+    if (method === "POST" && endpoint === "/api/properties") {
+      const property = store2.createProperty(userId, body, deviceName);
+      return { ok: true, status: 201, data: { property }, entityType: "properties", entityId: property.id };
+    }
+    if (method === "POST" && endpoint === "/api/units") {
+      const unit = store2.createUnit(userId, body, deviceName);
+      return { ok: true, status: 201, data: { unit }, entityType: "units", entityId: unit.id };
+    }
+    let m;
+    if (method === "PATCH" && (m = /^\/api\/units\/([^/]+)\/status$/.exec(endpoint))) {
+      const unit = store2.updateUnitStatus(userId, m[1], body.status, body.reason, deviceName);
+      return { ok: true, status: 200, data: { unit }, entityType: "units", entityId: unit.id };
+    }
+    if (method === "POST" && (m = /^\/api\/units\/([^/]+)\/link-tenant$/.exec(endpoint))) {
+      const unit = store2.linkTenantToUnit(userId, m[1], body.tenantId, deviceName);
+      return { ok: true, status: 200, data: { unit }, entityType: "units", entityId: unit.id };
+    }
+    if (method === "POST" && endpoint === "/api/tenants") {
+      const tenant = store2.createTenant(userId, body, deviceName);
+      return { ok: true, status: 201, data: { tenant }, entityType: "tenants", entityId: tenant.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/tenants\/([^/]+)$/.exec(endpoint))) {
+      const tenant = store2.updateTenant(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { tenant }, entityType: "tenants", entityId: tenant.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/tenants\/([^/]+)$/.exec(endpoint))) {
+      store2.deleteTenant(userId, m[1], deviceName);
+      return { ok: true, status: 200, data: { ok: true }, entityType: "tenants", entityId: m[1] };
+    }
+    if (method === "PATCH" && (m = /^\/api\/tenants\/([^/]+)\/checklist$/.exec(endpoint))) {
+      const tenant = store2.updateTenantChecklist(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { tenant }, entityType: "tenants", entityId: tenant.id };
+    }
+    if (method === "POST" && (m = /^\/api\/tenants\/([^/]+)\/notes$/.exec(endpoint))) {
+      const note = store2.addTenantViolationNote(userId, m[1], body, deviceName);
+      return { ok: true, status: 201, data: { note }, entityType: "tenants", entityId: m[1] };
+    }
+    if (method === "POST" && (m = /^\/api\/tenants\/([^/]+)\/appointments$/.exec(endpoint))) {
+      const log = store2.scheduleTenantAppointment(userId, m[1], body, deviceName);
+      return { ok: true, status: 201, data: { log }, entityType: "tenants", entityId: m[1] };
+    }
+    if (method === "POST" && endpoint === "/api/leads") {
+      const lead = store2.createLead(userId, body, deviceName);
+      return { ok: true, status: 201, data: { lead }, entityType: "leads", entityId: lead.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/leads\/([^/]+)$/.exec(endpoint))) {
+      const lead = store2.updateLead(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { lead }, entityType: "leads", entityId: lead.id };
+    }
+    if (method === "POST" && (m = /^\/api\/leads\/([^/]+)\/escalate$/.exec(endpoint))) {
+      const escalation = store2.escalateLead(userId, m[1], body, deviceName);
+      return { ok: true, status: 201, data: { escalation }, entityType: "leads", entityId: m[1] };
+    }
+    if (method === "POST" && (m = /^\/api\/leads\/([^/]+)\/convert$/.exec(endpoint))) {
+      const result = store2.convertLeadToTenant(userId, m[1], deviceName);
+      return { ok: true, status: 201, data: { ...result }, entityType: "leads", entityId: m[1] };
+    }
+    if (method === "POST" && (m = /^\/api\/lead-escalations\/([^/]+)\/decision$/.exec(endpoint))) {
+      const escalation = store2.decideLeadEscalation(
+        userId,
+        m[1],
+        { decision: body.decision, decisionNotes: body.decisionNotes, isToken: false },
+        deviceName
+      );
+      return { ok: true, status: 200, data: { escalation }, entityType: "leadEscalations", entityId: escalation.id };
+    }
+    if (method === "POST" && endpoint === "/api/contracts") {
+      const result = store2.createContract(userId, body, deviceName);
+      return { ok: true, status: 201, data: { ...result }, entityType: "contracts", entityId: result.contract.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/contracts\/([^/]+)$/.exec(endpoint))) {
+      const contract = store2.updateContractDetails(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { contract }, entityType: "contracts", entityId: contract.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/contracts\/([^/]+)\/ejar$/.exec(endpoint))) {
+      const contract = store2.updateContractEjarStatus(
+        userId,
+        m[1],
+        body.ejarNumber,
+        body.ejarStatus,
+        body.lifecycleStatus,
+        deviceName
+      );
+      return { ok: true, status: 200, data: { contract }, entityType: "contracts", entityId: contract.id };
+    }
+    if (method === "POST" && (m = /^\/api\/contracts\/([^/]+)\/renew$/.exec(endpoint))) {
+      const result = store2.renewContract(userId, m[1], body, deviceName);
+      return { ok: true, status: 201, data: { ...result }, entityType: "contracts", entityId: result.contract.id };
+    }
+    if (method === "POST" && endpoint === "/api/handovers") {
+      const handover = store2.createHandoverInspection(userId, body, deviceName);
+      return { ok: true, status: 201, data: { handover }, entityType: "handovers", entityId: handover.id };
+    }
+    if (method === "POST" && (m = /^\/api\/handovers\/([^/]+)\/approve$/.exec(endpoint))) {
+      const handover = store2.approveHandover(userId, m[1], body.nextUnitStatus, deviceName);
+      return { ok: true, status: 200, data: { handover }, entityType: "handovers", entityId: handover.id };
+    }
+    if (method === "POST" && endpoint === "/api/payments") {
+      const idempotencyKey = input.idempotencyKey || String(body.idempotencyKey || input.operationId || `sync-${Date.now()}`);
+      const payment = store2.recordPayment(userId, { ...body, idempotencyKey }, deviceName);
+      return { ok: true, status: 201, data: { payment }, entityType: "payments", entityId: payment.id };
+    }
+    if (method === "POST" && (m = /^\/api\/payments\/([^/]+)\/reverse$/.exec(endpoint))) {
+      const payment = store2.reverseReceipt(userId, m[1], body.reason, deviceName);
+      return { ok: true, status: 200, data: { payment }, entityType: "payments", entityId: payment.id };
+    }
+    if (method === "POST" && endpoint === "/api/expenses") {
+      const expense = store2.createExpense(userId, body, deviceName);
+      return { ok: true, status: 201, data: { expense }, entityType: "expenses", entityId: expense.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/expenses\/([^/]+)$/.exec(endpoint))) {
+      const expense = store2.updateOrCancelExpense(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { expense }, entityType: "expenses", entityId: expense.id };
+    }
+    if (method === "POST" && (m = /^\/api\/expenses\/([^/]+)\/decision$/.exec(endpoint))) {
+      const expense = store2.decideExpense(userId, m[1], body.decision, body.reason, deviceName);
+      return { ok: true, status: 200, data: { expense }, entityType: "expenses", entityId: expense.id };
+    }
+    if (method === "POST" && endpoint === "/api/tickets") {
+      const ticket = store2.createTicket(userId, body, deviceName);
+      return { ok: true, status: 201, data: { ticket }, entityType: "tickets", entityId: ticket.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/tickets\/([^/]+)$/.exec(endpoint))) {
+      const ticket = store2.updateTicket(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { ticket }, entityType: "tickets", entityId: ticket.id };
+    }
+    if (method === "POST" && endpoint === "/api/tasks") {
+      const task = store2.createTask(userId, body, deviceName);
+      return { ok: true, status: 201, data: { task }, entityType: "tasks", entityId: task.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/tasks\/([^/]+)$/.exec(endpoint))) {
+      const task = store2.updateTask(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { task }, entityType: "tasks", entityId: task.id };
+    }
+    if (method === "POST" && (m = /^\/api\/tasks\/([^/]+)\/reassign$/.exec(endpoint))) {
+      const task = store2.reassignTask(userId, m[1], String(body.assignedTo || ""), body.reason, deviceName);
+      return { ok: true, status: 200, data: { task }, entityType: "tasks", entityId: task.id };
+    }
+    if (method === "POST" && (m = /^\/api\/tasks\/([^/]+)\/review$/.exec(endpoint))) {
+      const task = store2.reviewTask(
+        userId,
+        m[1],
+        body.decision === "reject" ? "reject" : "approve",
+        body.reason,
+        deviceName
+      );
+      return { ok: true, status: 200, data: { task }, entityType: "tasks", entityId: task.id };
+    }
+    if (method === "POST" && endpoint === "/api/communications") {
+      const log = store2.addCommunication(userId, body, deviceName);
+      return { ok: true, status: 201, data: { log }, entityType: "communications", entityId: log.id };
+    }
+    if (method === "POST" && endpoint === "/api/documents") {
+      const doc = store2.addDocument(userId, body, deviceName);
+      return { ok: true, status: 201, data: { doc }, entityType: "documents", entityId: doc.id };
+    }
+    if (method === "POST" && (m = /^\/api\/documents\/([^/]+)\/access$/.exec(endpoint))) {
+      const doc = store2.recordDocumentAccess(userId, m[1], body.action || "\u0645\u0639\u0627\u064A\u0646\u0629", deviceName);
+      return { ok: true, status: 200, data: { doc }, entityType: "documents", entityId: doc.id };
+    }
+    if (method === "POST" && endpoint === "/api/vendors") {
+      const vendor = store2.createVendor(userId, body, deviceName);
+      return { ok: true, status: 201, data: { vendor }, entityType: "vendors", entityId: vendor.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/vendors\/([^/]+)$/.exec(endpoint))) {
+      const vendor = store2.updateVendor(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { vendor }, entityType: "vendors", entityId: vendor.id };
+    }
+    if (method === "POST" && endpoint === "/api/permissions/toggle") {
+      const rolePermissions = store2.toggleRolePermission(userId, body.role, body.permission, deviceName);
+      return { ok: true, status: 200, data: { rolePermissions }, entityType: "rolePermissions", entityId: String(body.role) };
+    }
+    if (method === "POST" && endpoint === "/api/notifications/read") {
+      store2.markNotificationsRead(userId);
+      return { ok: true, status: 200, data: { ok: true } };
+    }
+    if (method === "POST" && endpoint === "/api/companies") {
+      const company = store2.createCompany(userId, body, deviceName);
+      return { ok: true, status: 201, data: { company }, entityType: "companies", entityId: company.id };
+    }
+    if (method === "PATCH" && endpoint === "/api/settings") {
+      const settings = store2.updateSettings(userId, body, deviceName);
+      return { ok: true, status: 200, data: { settings }, entityType: "settings", entityId: "company" };
+    }
+    if (method === "POST" && endpoint === "/api/reminders/rules") {
+      const rule = store2.createReminderRule(userId, body, deviceName);
+      return { ok: true, status: 201, data: { rule }, entityType: "reminderRules", entityId: rule.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/reminders\/rules\/([^/]+)$/.exec(endpoint))) {
+      const rule = store2.toggleReminderRule(userId, m[1], Boolean(body.enabled), deviceName);
+      return { ok: true, status: 200, data: { rule }, entityType: "reminderRules", entityId: rule.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/reminders\/rules\/([^/]+)$/.exec(endpoint))) {
+      store2.deleteReminderRule(userId, m[1], deviceName);
+      return { ok: true, status: 200, data: { ok: true }, entityType: "reminderRules", entityId: m[1] };
+    }
+    if (method === "POST" && endpoint === "/api/reminders/run") {
+      const result = store2.runReminderScheduler(userId, body);
+      return { ok: true, status: 200, data: { ...result } };
+    }
+    if (method === "POST" && (m = /^\/api\/owners\/([^/]+)\/transfer$/.exec(endpoint))) {
+      const result = store2.recordOwnerTransfer(userId, m[1], body, deviceName);
+      return { ok: true, status: 201, data: { ...result }, entityType: "owners", entityId: m[1] };
+    }
+    if (method === "POST" && endpoint === "/api/purchase-orders") {
+      const po = store2.createPurchaseOrder(userId, body, deviceName);
+      return { ok: true, status: 201, data: { po }, entityType: "purchaseOrders", entityId: po.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/purchase-orders\/([^/]+)$/.exec(endpoint))) {
+      const po = store2.updatePurchaseOrder(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { po }, entityType: "purchaseOrders", entityId: po.id };
+    }
+    if (method === "POST" && endpoint === "/api/decisions") {
+      const decision = store2.createDecision(userId, body, deviceName);
+      return { ok: true, status: 201, data: { decision }, entityType: "decisions", entityId: decision.id };
+    }
+    if (method === "POST" && endpoint === "/api/archive/move") {
+      const result = store2.archiveEntity(userId, body, deviceName);
+      return { ok: true, status: 200, data: { ...result }, entityType: String(body.category || "archive"), entityId: String(body.id || "") };
+    }
+    if (method === "POST" && endpoint === "/api/archive/restore") {
+      const result = store2.restoreArchivedEntity(userId, body, deviceName);
+      return { ok: true, status: 200, data: { ...result }, entityType: String(body.category || "archive"), entityId: String(body.id || "") };
+    }
+    if (method === "POST" && endpoint === "/api/archive/filters") {
+      const filter = store2.saveArchiveFilter(userId, body, deviceName);
+      return { ok: true, status: 201, data: { filter }, entityType: "savedArchiveFilters", entityId: filter.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/archive\/filters\/([^/]+)$/.exec(endpoint))) {
+      store2.deleteArchiveFilter(userId, m[1]);
+      return { ok: true, status: 200, data: { ok: true }, entityType: "savedArchiveFilters", entityId: m[1] };
+    }
+    if (method === "POST" && endpoint === "/api/team/users") {
+      const user = store2.createStaffUser(userId, body, deviceName);
+      return { ok: true, status: 201, data: { user }, entityType: "users", entityId: user.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/team\/users\/([^/]+)$/.exec(endpoint))) {
+      const user = store2.updateStaffUser(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { user }, entityType: "users", entityId: user.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/team\/users\/([^/]+)$/.exec(endpoint))) {
+      const result = store2.deleteStaffUser(userId, m[1], deviceName);
+      return { ok: true, status: 200, data: { ...result }, entityType: "users", entityId: m[1] };
+    }
+    if (method === "PATCH" && endpoint === "/api/team/security-policy") {
+      const securityPolicy = store2.updateSecurityPolicy(userId, body, deviceName);
+      return { ok: true, status: 200, data: { securityPolicy }, entityType: "securityPolicy", entityId: "policy" };
+    }
+    if (method === "POST" && endpoint === "/api/templates") {
+      const template = store2.createTemplate(userId, body, deviceName);
+      return { ok: true, status: 201, data: { template }, entityType: "communicationTemplates", entityId: template.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/templates\/([^/]+)$/.exec(endpoint))) {
+      const template = store2.updateTemplate(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { template }, entityType: "communicationTemplates", entityId: template.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/templates\/([^/]+)$/.exec(endpoint))) {
+      store2.deleteTemplate(userId, m[1], deviceName);
+      return { ok: true, status: 200, data: { ok: true }, entityType: "communicationTemplates", entityId: m[1] };
+    }
+    if (method === "POST" && (m = /^\/api\/templates\/([^/]+)\/use$/.exec(endpoint))) {
+      const result = store2.useTemplate(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { ...result }, entityType: "communicationTemplates", entityId: m[1] };
+    }
+    if (method === "POST" && endpoint === "/api/supplier-invoices") {
+      const invoice = store2.createSupplierInvoice(userId, body, deviceName);
+      return { ok: true, status: 201, data: { invoice }, entityType: "supplierInvoices", entityId: invoice.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/supplier-invoices\/([^/]+)$/.exec(endpoint))) {
+      const invoice = store2.updateSupplierInvoice(userId, m[1], body, deviceName);
+      return { ok: true, status: 200, data: { invoice }, entityType: "supplierInvoices", entityId: invoice.id };
+    }
+    if (method === "POST" && endpoint === "/api/recurring-expenses") {
+      const rule = store2.createRecurringExpense(userId, body, deviceName);
+      return { ok: true, status: 201, data: { rule }, entityType: "recurringExpenses", entityId: rule.id };
+    }
+    if (method === "PATCH" && (m = /^\/api\/recurring-expenses\/([^/]+)$/.exec(endpoint))) {
+      const rule = store2.toggleRecurringExpense(userId, m[1], Boolean(body.enabled), deviceName);
+      return { ok: true, status: 200, data: { rule }, entityType: "recurringExpenses", entityId: rule.id };
+    }
+    if (method === "POST" && endpoint === "/api/property-budgets") {
+      const budget = store2.upsertPropertyBudget(userId, body, deviceName);
+      return { ok: true, status: 201, data: { budget }, entityType: "propertyBudgets", entityId: budget.id };
+    }
+    if (method === "POST" && endpoint === "/api/meters/readings") {
+      const reading = store2.createMeterReading(userId, body, deviceName);
+      return { ok: true, status: 201, data: { reading }, entityType: "meterReadings", entityId: reading.id };
+    }
+    if (method === "POST" && endpoint === "/api/zatca/invoices") {
+      const invoice = store2.createZatcaInvoice(userId, body, deviceName);
+      return { ok: true, status: 201, data: { invoice }, entityType: "zatcaInvoices", entityId: invoice.id };
+    }
+    if (method === "POST" && endpoint === "/api/reports/schedules") {
+      const schedule = store2.createScheduledReport(userId, body, deviceName);
+      return { ok: true, status: 201, data: { schedule }, entityType: "scheduledReports", entityId: schedule.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/reports\/schedules\/([^/]+)$/.exec(endpoint))) {
+      const result = store2.deleteScheduledReport(userId, m[1], deviceName);
+      return { ok: true, status: 200, data: { ...result }, entityType: "scheduledReports", entityId: m[1] };
+    }
+    if (method === "POST" && endpoint === "/api/reports/favorites") {
+      const preset = store2.saveFavoriteReport(userId, body, deviceName);
+      return { ok: true, status: 201, data: { preset }, entityType: "favoriteReports", entityId: preset.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/reports\/favorites\/([^/]+)$/.exec(endpoint))) {
+      const result = store2.deleteFavoriteReport(userId, m[1]);
+      return { ok: true, status: 200, data: { ...result }, entityType: "favoriteReports", entityId: m[1] };
+    }
+    if (method === "POST" && endpoint === "/api/search/filters") {
+      const filter = store2.saveSharedSearchFilter(userId, body, deviceName);
+      return { ok: true, status: 201, data: { filter }, entityType: "sharedSearchFilters", entityId: filter.id };
+    }
+    if (method === "DELETE" && (m = /^\/api\/search\/filters\/([^/]+)$/.exec(endpoint))) {
+      const result = store2.deleteSharedSearchFilter(userId, m[1]);
+      return { ok: true, status: 200, data: { ...result }, entityType: "sharedSearchFilters", entityId: m[1] };
+    }
+    return {
+      ok: false,
+      status: 404,
+      data: { error: `\u0646\u0642\u0637\u0629 \u0627\u0644\u0646\u0647\u0627\u064A\u0629 \u063A\u064A\u0631 \u0645\u062F\u0639\u0648\u0645\u0629 \u0644\u0644\u0645\u0632\u0627\u0645\u0646\u0629 (${method} ${endpoint})` }
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 400,
+      data: { error: err.message }
+    };
+  }
+}
+
 // server.ts
 dotenv.config();
+var SESSION_COOKIE_NAME = "aqar_session";
+var REFRESH_COOKIE_NAME = "aqar_refresh";
+var SESSION_TTL_MS = 1e3 * 60 * 60 * 24 * 7;
+var ACCESS_TOKEN_TTL_MS = 1e3 * 60 * 60 * 4;
+var SESSION_SHORT_TTL_MS = 1e3 * 60 * 60 * 8;
 function resolvePort() {
   const portFlagIdx = process.argv.findIndex((a) => a === "--port" || a === "-p");
   if (portFlagIdx !== -1 && process.argv[portFlagIdx + 1]) {
@@ -7704,7 +11031,106 @@ function resolvePort() {
   return 3e3;
 }
 var PORT = resolvePort();
-var store = new AqarStore();
+function normalizeWorkspaceId(raw) {
+  const clean = (raw || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return clean.length >= 3 && clean.length <= 40 ? clean : "default";
+}
+function resolveRequestWorkspaceId(req) {
+  const headerWs = req.headers["x-workspace-id"];
+  if (typeof headerWs === "string" && headerWs.trim()) {
+    return normalizeWorkspaceId(headerWs);
+  }
+  const rawUrl = req.url || "/";
+  const qIdx = rawUrl.indexOf("?");
+  if (qIdx >= 0) {
+    const params = new URLSearchParams(rawUrl.slice(qIdx + 1));
+    const qWs = params.get("workspace");
+    if (qWs) return normalizeWorkspaceId(qWs);
+  }
+  return "default";
+}
+var workspaceStores = /* @__PURE__ */ new Map();
+var workspaceAls = new AsyncLocalStorage();
+function getExistingWorkspaceStore(workspaceId = "default") {
+  const clean = normalizeWorkspaceId(workspaceId);
+  const cached = workspaceStores.get(clean);
+  if (cached) return cached;
+  if (clean !== "default" && !AqarStore.workspaceExists(clean)) {
+    return null;
+  }
+  const created = new AqarStore(clean);
+  workspaceStores.set(clean, created);
+  return created;
+}
+function provisionNewWorkspaceStore(workspaceId, opts) {
+  const clean = normalizeWorkspaceId(workspaceId);
+  if (clean === "default" || workspaceStores.has(clean) || AqarStore.workspaceExists(clean)) {
+    throw new Error("\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u0647\u0630\u0647 \u0645\u0641\u0639\u0651\u0644\u0629 \u0645\u0633\u0628\u0642\u0627\u064B \u2014 \u0627\u062E\u062A\u0631 \u0645\u0639\u0631\u0651\u0641 \u0634\u0631\u0643\u0629 \u0645\u062E\u062A\u0644\u0641\u0627\u064B \u0623\u0648 \u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644");
+  }
+  const created = new AqarStore(clean, opts);
+  workspaceStores.set(clean, created);
+  return created;
+}
+function getBaseDataDir2() {
+  return process.env.AQARPLUS_USER_DATA_DIR ? path3.resolve(process.env.AQARPLUS_USER_DATA_DIR) : path3.resolve(process.cwd(), "data");
+}
+function listAllWorkspaceIds() {
+  const found = /* @__PURE__ */ new Set(["default"]);
+  for (const key of workspaceStores.keys()) {
+    found.add(key);
+  }
+  const wsRoot = path3.join(getBaseDataDir2(), "workspaces");
+  if (fs3.existsSync(wsRoot)) {
+    try {
+      for (const entry of fs3.readdirSync(wsRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const clean = normalizeWorkspaceId(entry.name);
+        if (clean !== "default" && fs3.existsSync(path3.join(wsRoot, entry.name, "aqarplus.sqlite"))) {
+          found.add(clean);
+        }
+      }
+    } catch {
+    }
+  }
+  return Array.from(found);
+}
+function getServerMasterSecret() {
+  if (process.env.AQAR_SESSION_SECRET && process.env.AQAR_SESSION_SECRET.length >= 16) {
+    return process.env.AQAR_SESSION_SECRET;
+  }
+  return getExistingWorkspaceStore("default").getSessionSecret();
+}
+var authRateBuckets = /* @__PURE__ */ new Map();
+function checkAuthRateLimit(bucketKey, maxRequests, windowMs = 6e4) {
+  const now = Date.now();
+  const prev = authRateBuckets.get(bucketKey) || [];
+  const recent = prev.filter((ts) => now - ts < windowMs);
+  if (recent.length >= maxRequests) {
+    const oldest = recent[0];
+    const retryAfterSec = Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1e3));
+    authRateBuckets.set(bucketKey, recent);
+    return retryAfterSec;
+  }
+  recent.push(now);
+  authRateBuckets.set(bucketKey, recent);
+  return null;
+}
+function isSecureRequest(req) {
+  if (req.secure) return true;
+  const fwdProto = req.headers["x-forwarded-proto"];
+  if (typeof fwdProto === "string") {
+    return fwdProto.split(",")[0].trim().toLowerCase() === "https";
+  }
+  return false;
+}
+var store = new Proxy({}, {
+  get(_target, prop) {
+    const alsStore = workspaceAls.getStore()?.store;
+    const active = (alsStore && alsStore !== store ? alsStore : null) || getExistingWorkspaceStore("default");
+    const value = active[prop];
+    return typeof value === "function" ? value.bind(active) : value;
+  }
+});
 var activeSessions = /* @__PURE__ */ new Map();
 function extractClientIp(req) {
   const fwd = req.headers["x-forwarded-for"];
@@ -7714,10 +11140,154 @@ function extractClientIp(req) {
   const remote = req.socket?.remoteAddress || "127.0.0.1";
   return remote.replace(/^::ffff:/, "");
 }
-function getPresenceList() {
-  const state = store.getState();
+function parseCookies(cookieHeader) {
+  const result = {};
+  if (!cookieHeader) return result;
+  for (const part of cookieHeader.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx <= 0) continue;
+    const key = part.slice(0, idx).trim();
+    const val = part.slice(idx + 1).trim();
+    try {
+      result[key] = decodeURIComponent(val);
+    } catch {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+function extractSessionToken(req) {
+  const authHeader = req.headers["authorization"];
+  if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  const cookies = parseCookies(req.headers["cookie"]);
+  return cookies[SESSION_COOKIE_NAME] || null;
+}
+function resolveSessionActor(req, overrideToken) {
+  const workspaceId = resolveRequestWorkspaceId(req);
+  const wsStore = getExistingWorkspaceStore(workspaceId);
+  if (!wsStore) return null;
+  const rawToken = overrideToken || extractSessionToken(req);
+  if (!rawToken) return null;
+  const payload = verifySessionToken(rawToken, wsStore.getSessionSecret());
+  if (!payload) return null;
+  if (payload.wid && payload.wid !== workspaceId) return null;
+  const dbSession = wsStore.getPersistence().isSessionActive(rawToken);
+  if (!dbSession || dbSession.userId !== payload.uid) return null;
+  const user = wsStore.getState().users.find(
+    (u) => u.id === payload.uid && u.active && (!u.accountStatus || u.accountStatus === "\u0646\u0634\u0637")
+  );
+  if (!user) return null;
+  wsStore.getPersistence().updateSessionLastSeen(rawToken);
+  const rawDevice = req.headers["x-device-name"];
+  let deviceName = payload.deviceName;
+  if (rawDevice) {
+    try {
+      deviceName = decodeURIComponent(String(rawDevice));
+    } catch {
+      deviceName = String(rawDevice);
+    }
+  }
+  return {
+    userId: user.id,
+    workspaceId,
+    role: user.role,
+    sessionId: payload.sid,
+    rawToken,
+    deviceName,
+    ipAddress: extractClientIp(req)
+  };
+}
+function sendApiError(res, err, defaultStatus = 400) {
+  if (err instanceof PermissionDeniedError) {
+    return res.status(403).json({ error: err.message, code: "FORBIDDEN" });
+  }
+  const msg = err?.message || "\u062A\u0639\u0630\u0631 \u062A\u0646\u0641\u064A\u0630 \u0627\u0644\u0637\u0644\u0628";
+  return res.status(defaultStatus).json({ error: msg });
+}
+function disconnectUserWebSockets(userId, workspaceId, reason, targetSessionId, excludeSessionId) {
+  let closed = 0;
+  for (const [client, session] of Array.from(activeSessions.entries())) {
+    if (session.workspaceId !== workspaceId || session.userId !== userId) continue;
+    if (targetSessionId && session.sessionId !== targetSessionId) continue;
+    if (excludeSessionId && session.sessionId === excludeSessionId) continue;
+    if (client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(
+          JSON.stringify({
+            type: "session:terminated",
+            userId: session.userId,
+            sessionId: session.sessionId,
+            reason
+          })
+        );
+      } catch {
+      }
+    }
+    try {
+      client.close();
+    } catch {
+    }
+    activeSessions.delete(client);
+    closed += 1;
+  }
+  if (closed > 0) {
+    broadcastPresence(workspaceId);
+  }
+  return closed;
+}
+function issueUserSession(res, userId, role, deviceName = "Web Terminal", workspaceId = workspaceAls.getStore()?.workspaceId || "default", rememberMe = true, ipAddress, opts) {
+  const wsStore = getExistingWorkspaceStore(workspaceId);
+  const now = Date.now();
+  const accessTtlMs = rememberMe ? ACCESS_TOKEN_TTL_MS : SESSION_SHORT_TTL_MS;
+  const exp = now + accessTtlMs;
+  const expiresAt = new Date(exp).toISOString();
+  const refreshTtlMs = rememberMe ? SESSION_TTL_MS : SESSION_SHORT_TTL_MS;
+  const refreshExpiresAt = rememberMe ? new Date(now + refreshTtlMs).toISOString() : void 0;
+  const rawRefreshToken = rememberMe ? crypto4.randomBytes(32).toString("hex") : void 0;
+  const sid = `ses-${crypto4.randomBytes(8).toString("hex")}`;
+  const token = signSessionToken(
+    { sid, uid: userId, wid: workspaceId, role, deviceName, iat: now, exp },
+    wsStore.getSessionSecret()
+  );
+  wsStore.getPersistence().createSession(token, userId, deviceName, expiresAt, {
+    sessionId: sid,
+    rememberMe,
+    ipAddress,
+    appType: opts?.appType === "desktop" ? "desktop" : "web",
+    deviceId: opts?.deviceId,
+    rawRefreshToken,
+    refreshExpiresAt
+  });
+  const secureFlag = Boolean(opts?.secureCookie);
+  res.cookie(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: secureFlag,
+    path: "/",
+    ...rememberMe ? { maxAge: accessTtlMs } : {}
+  });
+  if (rememberMe && rawRefreshToken) {
+    res.cookie(REFRESH_COOKIE_NAME, rawRefreshToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: secureFlag,
+      path: "/",
+      maxAge: refreshTtlMs
+    });
+  } else {
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: "/" });
+  }
+  return { token, refreshToken: rawRefreshToken, expiresAt, refreshExpiresAt, sessionId: sid, rememberMe };
+}
+function getPresenceList(workspaceId = workspaceAls.getStore()?.workspaceId || "default") {
+  const wsStore = getExistingWorkspaceStore(workspaceId);
+  if (!wsStore) return [];
+  const state = wsStore.getState();
   const seen = /* @__PURE__ */ new Map();
   for (const s of activeSessions.values()) {
+    if (!s.authenticated || s.workspaceId !== workspaceId) continue;
     const user = state.users.find((u) => u.id === s.userId);
     if (user) {
       seen.set(s.sessionId, {
@@ -7733,45 +11303,916 @@ function getPresenceList() {
   }
   return Array.from(seen.values());
 }
-function broadcastPresence() {
-  const payload = JSON.stringify({ type: "presence:update", sessions: getPresenceList() });
-  for (const client of activeSessions.keys()) {
-    if (client.readyState === WebSocket.OPEN) {
+function broadcastPresence(workspaceId = workspaceAls.getStore()?.workspaceId || "default") {
+  const payload = JSON.stringify({ type: "presence:update", sessions: getPresenceList(workspaceId) });
+  for (const [client, session] of activeSessions.entries()) {
+    if (session.authenticated && session.workspaceId === workspaceId && client.readyState === WebSocket.OPEN) {
       client.send(payload);
     }
   }
 }
-function broadcastStateChange(actorUserId, eventSummary) {
+function broadcastStateChange(actorUserId, eventSummary, workspaceId = workspaceAls.getStore()?.workspaceId || "default") {
+  const wsStore = getExistingWorkspaceStore(workspaceId);
+  if (!wsStore) return;
   for (const [client, session] of activeSessions.entries()) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(
-        JSON.stringify({
-          type: "state:updated",
-          actorUserId,
-          summary: eventSummary,
-          state: store.getStateForUser(session.userId)
-        })
-      );
+    if (session.authenticated && session.workspaceId === workspaceId && client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(
+          JSON.stringify({
+            type: "state:updated",
+            actorUserId,
+            summary: eventSummary,
+            state: wsStore.getStateForUser(session.userId)
+          })
+        );
+      } catch {
+      }
     }
   }
 }
 function getActor(req) {
-  const userId = String(req.headers["x-user-id"] || req.query.userId || "usr-gm");
-  const rawDevice = req.headers["x-device-name"];
-  const deviceName = rawDevice ? decodeURIComponent(String(rawDevice)) : void 0;
-  return { userId, deviceName, ipAddress: extractClientIp(req) };
+  const actor = req.authActor;
+  if (!actor) {
+    throw new Error("\u062C\u0644\u0633\u0629 \u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0628\u0647\u0627 \u2014 \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644");
+  }
+  return actor;
+}
+var PUBLIC_API_EXACT = /* @__PURE__ */ new Set([
+  "/api/health",
+  "/api/workspaces/provision",
+  "/api/auth/session",
+  "/api/auth/login",
+  "/api/auth/login-pin",
+  "/api/auth/select-company",
+  "/api/auth/mfa/verify",
+  "/api/auth/mfa/resend",
+  "/api/auth/refresh",
+  "/api/auth/logout",
+  "/api/auth/recovery/request",
+  "/api/auth/recovery/reset",
+  "/api/public/prospect-context",
+  "/api/public/leads"
+]);
+function isPublicApiPath(fullPath) {
+  return PUBLIC_API_EXACT.has(fullPath) || fullPath.startsWith("/api/public/lead-decision/") || fullPath.startsWith("/api/public/invitations/");
 }
 function handleApi(app) {
   app.use(express.json({ limit: "15mb" }));
+  app.use("/api", (req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    const workspaceId = resolveRequestWorkspaceId(req);
+    const fullPath = `/api${req.path}`;
+    if (fullPath === "/api/workspaces/provision" || fullPath === "/api/auth/select-company" || fullPath === "/api/auth/mfa/verify" || fullPath === "/api/auth/mfa/resend") {
+      return next();
+    }
+    const wsStore = getExistingWorkspaceStore(workspaceId);
+    if (!wsStore) {
+      if (fullPath === "/api/auth/session") {
+        return res.json({
+          authenticated: false,
+          workspaceId,
+          workspaceExists: false,
+          demoLoginEnabled: process.env.AQAR_DEMO_LOGIN === "true",
+          loginProfiles: [],
+          companyBranding: {
+            nameAr: "\u0645\u0633\u0627\u062D\u0629 \u0639\u0645\u0644 \u062C\u062F\u064A\u062F\u0629",
+            nameEn: "New Workspace"
+          }
+        });
+      }
+      if (fullPath === "/api/auth/login" || fullPath === "/api/auth/login-pin") {
+        return res.status(401).json({
+          error: "\u0645\u0639\u0631\u0651\u0641 \u0627\u0644\u0634\u0631\u0643\u0629 \u063A\u064A\u0631 \u0645\u0633\u062C\u0644 \u0628\u0639\u062F \u2014 \u0627\u0636\u063A\u0637 \xAB\u0634\u0631\u0643\u0629 \u062C\u062F\u064A\u062F\u0629\xBB \u0644\u062A\u0623\u0633\u064A\u0633\u0647\u0627 \u0623\u0648 \u062A\u0623\u0643\u062F \u0645\u0646 Workspace ID"
+        });
+      }
+      if (fullPath.startsWith("/api/public/invitations/")) {
+        return res.status(404).json({
+          valid: false,
+          reason: "\u0627\u0644\u0634\u0631\u0643\u0629 \u0623\u0648 \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0645\u062D\u062F\u062F\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629",
+          workspaceExists: false
+        });
+      }
+      if (fullPath === "/api/auth/recovery/request") {
+        return res.json({
+          ok: true,
+          message: "\u0625\u0630\u0627 \u0643\u0627\u0646 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0633\u062C\u0644\u0627\u064B \u0648\u0646\u0634\u0637\u0627\u064B\u060C \u0641\u0633\u064A\u062A\u0645 \u0625\u0631\u0633\u0627\u0644 \u0631\u0645\u0632 \u062A\u062D\u0642\u0642 \u0644\u0644\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0635\u0627\u0644\u062D \u0644\u0645\u062F\u0629 15 \u062F\u0642\u064A\u0642\u0629."
+        });
+      }
+      if (fullPath === "/api/auth/recovery/reset") {
+        return res.status(400).json({ error: "\u0631\u0645\u0632 \u0627\u0644\u062A\u062D\u0642\u0642 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D \u0623\u0648 \u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0629" });
+      }
+      return res.status(401).json({
+        error: "\u0627\u0646\u062A\u0647\u062A \u0627\u0644\u062C\u0644\u0633\u0629 \u0623\u0648 \u0644\u0645 \u064A\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u2014 \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u0635\u0627\u062F\u0642\u0629 \u0644\u0644\u0645\u062A\u0627\u0628\u0639\u0629",
+        code: "AUTH_REQUIRED"
+      });
+    }
+    workspaceAls.run({ workspaceId, store: wsStore }, () => next());
+  });
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, lastUpdatedAt: store.getState().lastUpdatedAt });
+    res.json({
+      ok: true,
+      workspaceId: workspaceAls.getStore()?.workspaceId || "default",
+      lastUpdatedAt: store.getState().lastUpdatedAt,
+      sqlite: store.getPersistence().getDiagnostics()
+    });
+  });
+  app.post("/api/workspaces/provision", (req, res) => {
+    try {
+      const requestedSlug = String(req.body?.workspaceSlug || "");
+      const headerWs = req.headers["x-workspace-id"];
+      const workspaceId = normalizeWorkspaceId(
+        requestedSlug || (typeof headerWs === "string" ? headerWs : "")
+      );
+      if (workspaceId === "default") {
+        return res.status(400).json({
+          error: "\u064A\u0631\u062C\u0649 \u0627\u062E\u062A\u064A\u0627\u0631 \u0645\u0639\u0631\u0651\u0641 \u0634\u0631\u0643\u0629 \u0645\u062E\u0635\u0635 \u0628\u0627\u0644\u0644\u063A\u0629 \u0627\u0644\u0625\u0646\u062C\u0644\u064A\u0632\u064A\u0629 (3 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644)"
+        });
+      }
+      const companyNameAr = String(req.body?.companyNameAr || "").trim();
+      const companyNameEn = String(req.body?.companyNameEn || companyNameAr || "AqarPlus Workspace").trim();
+      const adminNameAr = String(req.body?.adminNameAr || "").trim();
+      const adminEmail = String(req.body?.adminEmail || "").trim().toLowerCase();
+      const adminPhone = String(req.body?.adminPhone || "").trim();
+      const password = String(req.body?.password || "");
+      const pin = String(req.body?.pin || "").trim();
+      if (!companyNameAr || !adminNameAr || !adminEmail || password.length < 8) {
+        return res.status(400).json({
+          error: "\u064A\u0644\u0632\u0645 \u0625\u062F\u062E\u0627\u0644 \u0627\u0633\u0645 \u0627\u0644\u0634\u0631\u0643\u0629\u060C \u0648\u0627\u0633\u0645 \u0627\u0644\u0645\u062F\u064A\u0631\u060C \u0648\u0627\u0644\u0628\u0631\u064A\u062F \u0627\u0644\u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A\u060C \u0648\u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u0644\u0627 \u062A\u0642\u0644 \u0639\u0646 8 \u0623\u062D\u0631\u0641"
+        });
+      }
+      if (pin && !/^\d{4,6}$/.test(pin)) {
+        return res.status(400).json({ error: "\u0631\u0645\u0632 PIN \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0643\u0648\u0646 \u0645\u0646 4 \u0625\u0644\u0649 6 \u0623\u0631\u0642\u0627\u0645 \u0641\u0642\u0637" });
+      }
+      const deviceName = String(req.body?.deviceName || "Web Terminal");
+      const provisionedStore = provisionNewWorkspaceStore(workspaceId, {
+        companyNameAr,
+        companyNameEn,
+        adminNameAr,
+        adminEmail,
+        adminPhone,
+        password,
+        pin: pin || void 0,
+        deviceName
+      });
+      return workspaceAls.run({ workspaceId, store: provisionedStore }, () => {
+        const adminUser = provisionedStore.getState().users[0];
+        const { token, expiresAt } = issueUserSession(
+          res,
+          adminUser.id,
+          adminUser.role,
+          deviceName,
+          workspaceId
+        );
+        res.status(201).json({
+          ok: true,
+          workspaceId,
+          authenticated: true,
+          user: adminUser,
+          token,
+          expiresAt,
+          state: provisionedStore.getStateForUser(adminUser.id)
+        });
+      });
+    } catch (e) {
+      const msg = e.message || "\u062A\u0639\u0630\u0631 \u062A\u0623\u0633\u064A\u0633 \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644";
+      res.status(msg.includes("\u0645\u0641\u0639\u0651\u0644\u0629 \u0645\u0633\u0628\u0642\u0627\u064B") ? 409 : 400).json({ error: msg });
+    }
+  });
+  const finalizeAuthenticatedLogin = (req, res, wsStore, wsId, user, opts) => {
+    const mfaReason = wsStore.evaluateMfaRequirement(user, opts.deviceId, {
+      suspiciousAttempt: opts.suspiciousAttempt
+    });
+    const settings = wsStore.getState().settings;
+    const companyBranding = {
+      nameAr: settings.nameAr,
+      nameEn: settings.nameEn,
+      logoDataUrl: settings.logoDataUrl
+    };
+    if (mfaReason) {
+      const challenge = wsStore.createMfaChallenge(user, mfaReason, opts.deviceName);
+      const challengeToken = signEphemeralToken(
+        {
+          kind: "mfa",
+          wid: wsId,
+          uid: user.id,
+          rememberMe: opts.rememberMe,
+          deviceId: opts.deviceId || "",
+          deviceName: opts.deviceName,
+          appType: opts.appType,
+          reason: mfaReason,
+          exp: Date.now() + 10 * 60 * 1e3
+        },
+        getServerMasterSecret()
+      );
+      return res.json({
+        authenticated: false,
+        requiresMfa: true,
+        reason: mfaReason,
+        workspaceId: wsId,
+        companyBranding,
+        challengeToken,
+        ...challenge
+      });
+    }
+    const session = issueUserSession(
+      res,
+      user.id,
+      user.role,
+      opts.deviceName,
+      wsId,
+      opts.rememberMe,
+      extractClientIp(req),
+      {
+        appType: opts.appType,
+        deviceId: opts.deviceId,
+        secureCookie: isSecureRequest(req)
+      }
+    );
+    const userState = wsStore.getStateForUser(user.id);
+    const landingNav = getRecommendedLandingNav(userState, user);
+    const allowedNavs = getAllowedNavsForUser(userState, user);
+    broadcastPresence(wsId);
+    return res.json({
+      authenticated: true,
+      workspaceId: wsId,
+      companyBranding,
+      user,
+      token: session.token,
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt,
+      refreshExpiresAt: session.refreshExpiresAt,
+      sessionId: session.sessionId,
+      rememberMe: session.rememberMe,
+      landingNav,
+      allowedNavs,
+      state: userState
+    });
+  };
+  app.get("/api/auth/session", (req, res) => {
+    const settings = store.getState().settings;
+    const demoLoginEnabled = process.env.AQAR_DEMO_LOGIN === "true";
+    const workspaceId = workspaceAls.getStore()?.workspaceId || "default";
+    const companyBranding = {
+      nameAr: settings.nameAr,
+      nameEn: settings.nameEn,
+      logoDataUrl: settings.logoDataUrl
+    };
+    const actor = resolveSessionActor(req);
+    if (!actor) {
+      return res.json({
+        authenticated: false,
+        workspaceId,
+        workspaceExists: true,
+        demoLoginEnabled,
+        loginProfiles: demoLoginEnabled ? store.getLoginProfiles() : [],
+        companyBranding
+      });
+    }
+    const user = store.getState().users.find((u) => u.id === actor.userId);
+    const userState = store.getStateForUser(actor.userId);
+    res.json({
+      authenticated: true,
+      workspaceId,
+      workspaceExists: true,
+      user,
+      token: actor.rawToken,
+      sessionId: actor.sessionId,
+      landingNav: getRecommendedLandingNav(userState, user),
+      allowedNavs: getAllowedNavsForUser(userState, user),
+      demoLoginEnabled,
+      loginProfiles: demoLoginEnabled ? store.getLoginProfiles() : [],
+      companyBranding
+    });
+  });
+  app.post("/api/auth/login", (req, res) => {
+    const ip = extractClientIp(req);
+    const maxPerMin = Number(process.env.AQAR_AUTH_RATE_LIMIT_MAX || 45);
+    const retrySec = checkAuthRateLimit(`login:${ip}`, maxPerMin, 6e4);
+    if (retrySec) {
+      return res.status(429).json({
+        error: `\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u062D\u062F \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u0624\u0642\u062A\u0627\u064B \u2014 \u062D\u0627\u0648\u0644 \u0628\u0639\u062F ${retrySec} \u062B\u0627\u0646\u064A\u0629`,
+        retryAfterSec: retrySec
+      });
+    }
+    const identifier = String(req.body?.identifier || req.body?.email || req.body?.userId || "");
+    const password = String(req.body?.password || "");
+    const rememberMe = req.body?.rememberMe !== false;
+    const appType = req.body?.appType === "desktop" ? "desktop" : "web";
+    const deviceId = req.body?.deviceId ? String(req.body.deviceId) : void 0;
+    const deviceName = req.body?.deviceName ? String(req.body.deviceName) : req.headers["x-device-name"] ? decodeURIComponent(String(req.headers["x-device-name"])) : "Web Terminal";
+    const autoDiscover = Boolean(req.body?.autoDiscover);
+    const selectedWorkspaceId = req.body?.selectedWorkspaceId ? normalizeWorkspaceId(String(req.body.selectedWorkspaceId)) : void 0;
+    if (!autoDiscover || selectedWorkspaceId) {
+      const targetWsId = selectedWorkspaceId || (workspaceAls.getStore()?.workspaceId || "default");
+      const targetStore = getExistingWorkspaceStore(targetWsId);
+      if (!targetStore) {
+        return res.status(401).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+      }
+      return workspaceAls.run({ workspaceId: targetWsId, store: targetStore }, () => {
+        try {
+          const { user, hadSuspiciousFailures } = targetStore.authenticatePasswordDetailed(
+            identifier,
+            password,
+            deviceName
+          );
+          return finalizeAuthenticatedLogin(req, res, targetStore, targetWsId, user, {
+            rememberMe,
+            deviceName,
+            appType,
+            deviceId,
+            suspiciousAttempt: hadSuspiciousFailures
+          });
+        } catch (e) {
+          const msg = e.message;
+          return res.status(msg.includes("\u0642\u0641\u0644 \u0627\u0644\u062D\u0633\u0627\u0628") ? 429 : 401).json({ error: msg });
+        }
+      });
+    }
+    const workspaceIds = listAllWorkspaceIds();
+    const verifiedMatches = [];
+    let lastStatusError = null;
+    for (const wsId of workspaceIds) {
+      const wsStore = getExistingWorkspaceStore(wsId);
+      if (!wsStore || !wsStore.hasUserWithIdentifier(identifier)) continue;
+      try {
+        const result = wsStore.authenticatePasswordDetailed(identifier, password, deviceName);
+        verifiedMatches.push({
+          workspaceId: wsId,
+          wsStore,
+          user: result.user,
+          hadSuspiciousFailures: result.hadSuspiciousFailures
+        });
+      } catch (e) {
+        const msg = e.message;
+        if (msg.includes("\u0642\u0641\u0644 \u0627\u0644\u062D\u0633\u0627\u0628")) {
+          lastStatusError = { status: 429, error: msg };
+        } else if (msg.includes("\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644") || msg.includes("\u0645\u0648\u0642\u0648\u0641") || msg.includes("\u0631\u0641\u0636") || msg.includes("\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629")) {
+          lastStatusError = { status: 401, error: msg };
+        }
+      }
+    }
+    if (verifiedMatches.length === 0) {
+      if (lastStatusError) {
+        return res.status(lastStatusError.status).json({ error: lastStatusError.error });
+      }
+      return res.status(401).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+    }
+    if (verifiedMatches.length === 1) {
+      const m = verifiedMatches[0];
+      return workspaceAls.run(
+        { workspaceId: m.workspaceId, store: m.wsStore },
+        () => finalizeAuthenticatedLogin(req, res, m.wsStore, m.workspaceId, m.user, {
+          rememberMe,
+          deviceName,
+          appType,
+          deviceId,
+          suspiciousAttempt: m.hadSuspiciousFailures
+        })
+      );
+    }
+    const selectionToken = signEphemeralToken(
+      {
+        kind: "company_select",
+        matches: verifiedMatches.map((m) => ({
+          wid: m.workspaceId,
+          uid: m.user.id,
+          suspicious: m.hadSuspiciousFailures
+        })),
+        rememberMe,
+        deviceId: deviceId || "",
+        deviceName,
+        appType,
+        exp: Date.now() + 5 * 60 * 1e3
+      },
+      getServerMasterSecret()
+    );
+    return res.json({
+      authenticated: false,
+      requiresCompanySelection: true,
+      selectionToken,
+      companies: verifiedMatches.map((m) => {
+        const s = m.wsStore.getState().settings;
+        return {
+          workspaceId: m.workspaceId,
+          companyNameAr: s.nameAr,
+          companyNameEn: s.nameEn,
+          logoDataUrl: s.logoDataUrl,
+          userNameAr: m.user.nameAr,
+          roleLabelAr: m.user.roleLabelAr,
+          roleLabelEn: m.user.roleLabelEn
+        };
+      })
+    });
+  });
+  app.post("/api/auth/login-pin", (req, res) => {
+    const ip = extractClientIp(req);
+    const maxPerMin = Number(process.env.AQAR_AUTH_RATE_LIMIT_MAX || 45);
+    const retrySec = checkAuthRateLimit(`pin:${ip}`, maxPerMin, 6e4);
+    if (retrySec) {
+      return res.status(429).json({
+        error: `\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u062D\u062F \u0645\u062D\u0627\u0648\u0644\u0627\u062A PIN \u0645\u0624\u0642\u062A\u0627\u064B \u2014 \u062D\u0627\u0648\u0644 \u0628\u0639\u062F ${retrySec} \u062B\u0627\u0646\u064A\u0629`,
+        retryAfterSec: retrySec
+      });
+    }
+    const userIdOrIdentifier = String(req.body?.userId || req.body?.identifier || "");
+    const pin = String(req.body?.pin || "");
+    const rememberMe = req.body?.rememberMe !== false;
+    const appType = req.body?.appType === "desktop" ? "desktop" : "web";
+    const deviceId = req.body?.deviceId ? String(req.body.deviceId) : void 0;
+    const deviceName = req.body?.deviceName ? String(req.body.deviceName) : "Web Terminal";
+    const autoDiscover = Boolean(req.body?.autoDiscover);
+    const selectedWorkspaceId = req.body?.selectedWorkspaceId ? normalizeWorkspaceId(String(req.body.selectedWorkspaceId)) : void 0;
+    if (!autoDiscover || selectedWorkspaceId) {
+      const targetWsId = selectedWorkspaceId || (workspaceAls.getStore()?.workspaceId || "default");
+      const targetStore = getExistingWorkspaceStore(targetWsId);
+      if (!targetStore) {
+        return res.status(401).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0623\u0648 \u0631\u0645\u0632 PIN \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+      }
+      return workspaceAls.run({ workspaceId: targetWsId, store: targetStore }, () => {
+        try {
+          const user = targetStore.authenticatePin(userIdOrIdentifier, pin, deviceName);
+          return finalizeAuthenticatedLogin(req, res, targetStore, targetWsId, user, {
+            rememberMe,
+            deviceName,
+            appType,
+            deviceId
+          });
+        } catch (e) {
+          const msg = e.message;
+          const isLockout = msg.includes("\u0642\u0641\u0644") || msg.includes("\u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631") || msg.includes("\u062A\u062C\u0627\u0648\u0632 \u0645\u062D\u0627\u0648\u0644\u0627\u062A");
+          return res.status(isLockout ? 429 : 401).json({ error: msg });
+        }
+      });
+    }
+    const workspaceIds = listAllWorkspaceIds();
+    const verifiedMatches = [];
+    let lastStatusError = null;
+    for (const wsId of workspaceIds) {
+      const wsStore = getExistingWorkspaceStore(wsId);
+      if (!wsStore || !wsStore.hasUserWithIdentifier(userIdOrIdentifier)) continue;
+      try {
+        const user = wsStore.authenticatePin(userIdOrIdentifier, pin, deviceName);
+        verifiedMatches.push({ workspaceId: wsId, wsStore, user });
+      } catch (e) {
+        const msg = e.message;
+        if (msg.includes("\u0642\u0641\u0644") || msg.includes("\u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631") || msg.includes("\u062A\u062C\u0627\u0648\u0632 \u0645\u062D\u0627\u0648\u0644\u0627\u062A")) {
+          lastStatusError = { status: 429, error: msg };
+        } else if (msg.includes("\u0645\u0639\u0637\u0651\u0644") || msg.includes("\u0645\u0624\u0642\u062A\u0627\u064B") || msg.includes("\u0628\u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062A\u0641\u0639\u064A\u0644") || msg.includes("\u0645\u0648\u0642\u0648\u0641")) {
+          lastStatusError = { status: 401, error: msg };
+        }
+      }
+    }
+    if (verifiedMatches.length === 0) {
+      if (lastStatusError) {
+        return res.status(lastStatusError.status).json({ error: lastStatusError.error });
+      }
+      return res.status(401).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0623\u0648 \u0631\u0645\u0632 PIN \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+    }
+    if (verifiedMatches.length === 1) {
+      const m = verifiedMatches[0];
+      return workspaceAls.run(
+        { workspaceId: m.workspaceId, store: m.wsStore },
+        () => finalizeAuthenticatedLogin(req, res, m.wsStore, m.workspaceId, m.user, {
+          rememberMe,
+          deviceName,
+          appType,
+          deviceId
+        })
+      );
+    }
+    const selectionToken = signEphemeralToken(
+      {
+        kind: "company_select",
+        matches: verifiedMatches.map((m) => ({ wid: m.workspaceId, uid: m.user.id, suspicious: false })),
+        rememberMe,
+        deviceId: deviceId || "",
+        deviceName,
+        appType,
+        exp: Date.now() + 5 * 60 * 1e3
+      },
+      getServerMasterSecret()
+    );
+    return res.json({
+      authenticated: false,
+      requiresCompanySelection: true,
+      selectionToken,
+      companies: verifiedMatches.map((m) => {
+        const s = m.wsStore.getState().settings;
+        return {
+          workspaceId: m.workspaceId,
+          companyNameAr: s.nameAr,
+          companyNameEn: s.nameEn,
+          logoDataUrl: s.logoDataUrl,
+          userNameAr: m.user.nameAr,
+          roleLabelAr: m.user.roleLabelAr,
+          roleLabelEn: m.user.roleLabelEn
+        };
+      })
+    });
+  });
+  app.post("/api/auth/select-company", (req, res) => {
+    try {
+      const token = String(req.body?.selectionToken || "");
+      const selectedWs = normalizeWorkspaceId(String(req.body?.workspaceId || ""));
+      const payload = verifyEphemeralToken(token, getServerMasterSecret());
+      if (!payload || payload.kind !== "company_select") {
+        return res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0645\u0647\u0644\u0629 \u0627\u062E\u062A\u064A\u0627\u0631 \u0627\u0644\u0634\u0631\u0643\u0629 \u2014 \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B" });
+      }
+      const match = payload.matches.find((m) => m.wid === selectedWs);
+      if (!match) {
+        return res.status(403).json({ error: "\u0644\u064A\u0633 \u0644\u062F\u064A\u0643 \u0639\u0636\u0648\u064A\u0629 \u0645\u0635\u0631\u062D \u0628\u0647\u0627 \u0641\u064A \u0647\u0630\u0647 \u0627\u0644\u0634\u0631\u0643\u0629" });
+      }
+      const wsStore = getExistingWorkspaceStore(selectedWs);
+      if (!wsStore) {
+        return res.status(404).json({ error: "\u0645\u0633\u0627\u062D\u0629 \u0639\u0645\u0644 \u0627\u0644\u0634\u0631\u0643\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      }
+      return workspaceAls.run({ workspaceId: selectedWs, store: wsStore }, () => {
+        const user = wsStore.getState().users.find(
+          (u) => u.id === match.uid && u.active && (!u.accountStatus || u.accountStatus === "\u0646\u0634\u0637")
+        );
+        if (!user) {
+          return res.status(403).json({ error: "\u0639\u0636\u0648\u064A\u062A\u0643 \u0641\u064A \u0647\u0630\u0647 \u0627\u0644\u0634\u0631\u0643\u0629 \u063A\u064A\u0631 \u0646\u0634\u0637\u0629 \u0623\u0648 \u062A\u0645 \u0625\u064A\u0642\u0627\u0641\u0647\u0627" });
+        }
+        return finalizeAuthenticatedLogin(req, res, wsStore, selectedWs, user, {
+          rememberMe: req.body?.rememberMe !== void 0 ? Boolean(req.body.rememberMe) : payload.rememberMe,
+          deviceName: String(req.body?.deviceName || payload.deviceName || "Web Terminal"),
+          appType: payload.appType === "desktop" ? "desktop" : "web",
+          deviceId: req.body?.deviceId ? String(req.body.deviceId) : payload.deviceId || void 0,
+          suspiciousAttempt: Boolean(match.suspicious)
+        });
+      });
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+  app.post("/api/auth/mfa/verify", (req, res) => {
+    const ip = extractClientIp(req);
+    const retrySec = checkAuthRateLimit(`mfa:${ip}`, 25, 6e4);
+    if (retrySec) {
+      return res.status(429).json({
+        error: `\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u062D\u062F \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062A\u062D\u0642\u0642 \u2014 \u062D\u0627\u0648\u0644 \u0628\u0639\u062F ${retrySec} \u062B\u0627\u0646\u064A\u0629`,
+        retryAfterSec: retrySec
+      });
+    }
+    try {
+      const challengeToken = String(req.body?.challengeToken || "");
+      const code = String(req.body?.code || "");
+      const trustDevice = Boolean(req.body?.trustDevice);
+      const payload = verifyEphemeralToken(challengeToken, getServerMasterSecret());
+      if (!payload || payload.kind !== "mfa") {
+        return res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u062C\u0644\u0633\u0629 \u0627\u0644\u062A\u062D\u0642\u0642 \u0627\u0644\u0625\u0636\u0627\u0641\u064A \u2014 \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B" });
+      }
+      const wsStore = getExistingWorkspaceStore(payload.wid);
+      if (!wsStore) {
+        return res.status(404).json({ error: "\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u063A\u064A\u0631 \u0645\u062A\u0627\u062D\u0629" });
+      }
+      return workspaceAls.run({ workspaceId: payload.wid, store: wsStore }, () => {
+        const deviceId = req.body?.deviceId ? String(req.body.deviceId) : payload.deviceId;
+        const deviceName = String(req.body?.deviceName || payload.deviceName || "Web Terminal");
+        const appType = payload.appType === "desktop" ? "desktop" : "web";
+        const user = wsStore.verifyMfaChallenge(payload.uid, code, {
+          trustDevice,
+          deviceId,
+          deviceName,
+          appType
+        });
+        const session = issueUserSession(
+          res,
+          user.id,
+          user.role,
+          deviceName,
+          payload.wid,
+          payload.rememberMe,
+          extractClientIp(req),
+          {
+            appType,
+            deviceId,
+            secureCookie: isSecureRequest(req)
+          }
+        );
+        const settings = wsStore.getState().settings;
+        const userState = wsStore.getStateForUser(user.id);
+        broadcastPresence(payload.wid);
+        return res.json({
+          authenticated: true,
+          workspaceId: payload.wid,
+          companyBranding: {
+            nameAr: settings.nameAr,
+            nameEn: settings.nameEn,
+            logoDataUrl: settings.logoDataUrl
+          },
+          user,
+          token: session.token,
+          refreshToken: session.refreshToken,
+          expiresAt: session.expiresAt,
+          refreshExpiresAt: session.refreshExpiresAt,
+          sessionId: session.sessionId,
+          rememberMe: session.rememberMe,
+          landingNav: getRecommendedLandingNav(userState, user),
+          allowedNavs: getAllowedNavsForUser(userState, user),
+          state: userState
+        });
+      });
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+  app.post("/api/auth/mfa/resend", (req, res) => {
+    try {
+      const challengeToken = String(req.body?.challengeToken || "");
+      const payload = verifyEphemeralToken(challengeToken, getServerMasterSecret());
+      if (!payload || payload.kind !== "mfa") {
+        return res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u062C\u0644\u0633\u0629 \u0627\u0644\u062A\u062D\u0642\u0642 \u2014 \u0623\u0639\u062F \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644" });
+      }
+      const wsStore = getExistingWorkspaceStore(payload.wid);
+      if (!wsStore) {
+        return res.status(404).json({ error: "\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644 \u063A\u064A\u0631 \u0645\u062A\u0627\u062D\u0629" });
+      }
+      return workspaceAls.run({ workspaceId: payload.wid, store: wsStore }, () => {
+        const user = wsStore.getState().users.find((u) => u.id === payload.uid && u.active);
+        if (!user) return res.status(401).json({ error: "\u0627\u0644\u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u062A\u0627\u062D" });
+        const challenge = wsStore.createMfaChallenge(user, payload.reason || "new_device", payload.deviceName);
+        return res.json({ ok: true, ...challenge });
+      });
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+  app.post("/api/auth/refresh", (req, res) => {
+    try {
+      const workspaceId = workspaceAls.getStore()?.workspaceId || "default";
+      const cookies = parseCookies(req.headers["cookie"]);
+      const rawRefreshToken = String(req.body?.refreshToken || cookies[REFRESH_COOKIE_NAME] || "").trim();
+      if (!rawRefreshToken) {
+        return res.status(401).json({ error: "\u0631\u0645\u0632 \u062A\u062C\u062F\u064A\u062F \u0627\u0644\u062C\u0644\u0633\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F", code: "AUTH_REQUIRED" });
+      }
+      const dbSession = store.getPersistence().findSessionByRefreshToken(rawRefreshToken);
+      if (!dbSession) {
+        res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
+        res.clearCookie(REFRESH_COOKIE_NAME, { path: "/" });
+        return res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0635\u0644\u0627\u062D\u064A\u0629 \u0627\u0644\u062C\u0644\u0633\u0629 \u2014 \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B", code: "AUTH_REQUIRED" });
+      }
+      const user = store.getState().users.find(
+        (u) => u.id === dbSession.userId && u.active && (!u.accountStatus || u.accountStatus === "\u0646\u0634\u0637")
+      );
+      if (!user) {
+        store.getPersistence().revokeOtherSessionsForUser(dbSession.userId);
+        return res.status(401).json({ error: "\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062D\u0633\u0627\u0628 \u0623\u0648 \u0627\u0646\u062A\u0647\u062A \u0639\u0636\u0648\u064A\u062A\u0647", code: "AUTH_REQUIRED" });
+      }
+      const now = Date.now();
+      const accessTtlMs = dbSession.rememberMe !== false ? ACCESS_TOKEN_TTL_MS : SESSION_SHORT_TTL_MS;
+      const exp = now + accessTtlMs;
+      const newExpiresAt = new Date(exp).toISOString();
+      const newRefreshExpiresAt = new Date(now + SESSION_TTL_MS).toISOString();
+      const newRefreshToken = crypto4.randomBytes(32).toString("hex");
+      const sid = dbSession.sessionId || `ses-${crypto4.randomBytes(8).toString("hex")}`;
+      const newAccessToken = signSessionToken(
+        { sid, uid: user.id, wid: workspaceId, role: user.role, deviceName: dbSession.deviceName, iat: now, exp },
+        store.getSessionSecret()
+      );
+      const rotated = store.getPersistence().rotateSessionTokens(rawRefreshToken, newAccessToken, newRefreshToken, newExpiresAt, newRefreshExpiresAt);
+      if (!rotated) {
+        return res.status(401).json({ error: "\u062A\u0639\u0630\u0631 \u062A\u062C\u062F\u064A\u062F \u0627\u0644\u062C\u0644\u0633\u0629 \u2014 \u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B", code: "AUTH_REQUIRED" });
+      }
+      const secureFlag = isSecureRequest(req);
+      res.cookie(SESSION_COOKIE_NAME, newAccessToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: secureFlag,
+        path: "/",
+        ...dbSession.rememberMe !== false ? { maxAge: accessTtlMs } : {}
+      });
+      if (dbSession.rememberMe !== false) {
+        res.cookie(REFRESH_COOKIE_NAME, newRefreshToken, {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: secureFlag,
+          path: "/",
+          maxAge: SESSION_TTL_MS
+        });
+      }
+      const userState = store.getStateForUser(user.id);
+      return res.json({
+        ok: true,
+        authenticated: true,
+        workspaceId,
+        token: newAccessToken,
+        refreshToken: newRefreshToken,
+        expiresAt: newExpiresAt,
+        refreshExpiresAt: newRefreshExpiresAt,
+        rememberMe: dbSession.rememberMe !== false,
+        user,
+        landingNav: getRecommendedLandingNav(userState, user),
+        allowedNavs: getAllowedNavsForUser(userState, user),
+        state: userState
+      });
+    } catch (e) {
+      return res.status(401).json({ error: e.message, code: "AUTH_REQUIRED" });
+    }
+  });
+  app.post("/api/auth/logout", (req, res) => {
+    const rawToken = extractSessionToken(req);
+    if (rawToken) {
+      store.getPersistence().revokeSession(rawToken);
+    }
+    res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: "/" });
+    res.json({ ok: true });
+  });
+  app.post("/api/auth/recovery/request", (req, res) => {
+    const ip = extractClientIp(req);
+    const retrySec = checkAuthRateLimit(`rec:${ip}`, 15, 6e4);
+    if (retrySec) {
+      return res.status(429).json({
+        error: `\u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 ${retrySec} \u062B\u0627\u0646\u064A\u0629 \u0642\u0628\u0644 \u0637\u0644\u0628 \u0631\u0645\u0632 \u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u062C\u062F\u064A\u062F`,
+        retryAfterSec: retrySec
+      });
+    }
+    try {
+      const identifier = String(req.body?.email || req.body?.identifier || "");
+      const purpose = req.body?.purpose === "pin_reset" ? "pin_reset" : "password_reset";
+      const deviceName = req.body?.deviceName ? String(req.body.deviceName) : "Web Recovery";
+      const autoDiscover = Boolean(req.body?.autoDiscover);
+      if (autoDiscover) {
+        for (const wsId of listAllWorkspaceIds()) {
+          const wsStore = getExistingWorkspaceStore(wsId);
+          if (wsStore && wsStore.hasUserWithIdentifier(identifier)) {
+            const result2 = wsStore.requestCredentialRecovery(identifier, purpose, deviceName);
+            return res.json({ ...result2, workspaceId: wsId });
+          }
+        }
+      }
+      const result = store.requestCredentialRecovery(identifier, purpose, deviceName);
+      res.json(result);
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+  app.post("/api/auth/recovery/reset", (req, res) => {
+    const ip = extractClientIp(req);
+    const retrySec = checkAuthRateLimit(`rec-reset:${ip}`, 20, 6e4);
+    if (retrySec) {
+      return res.status(429).json({
+        error: `\u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 ${retrySec} \u062B\u0627\u0646\u064A\u0629 \u0642\u0628\u0644 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u0627\u064B`,
+        retryAfterSec: retrySec
+      });
+    }
+    try {
+      const emailOrIdentifier = String(req.body?.email || req.body?.identifier || "");
+      const purpose = req.body?.purpose === "pin_reset" ? "pin_reset" : "password_reset";
+      const code = String(req.body?.code || "");
+      const newSecret = String(req.body?.newSecret || req.body?.newPassword || req.body?.newPin || "");
+      const confirmSecret = String(req.body?.confirmSecret || req.body?.confirmPassword || req.body?.confirmPin || "");
+      const deviceName = req.body?.deviceName ? String(req.body.deviceName) : "Web Recovery";
+      const autoDiscover = Boolean(req.body?.autoDiscover);
+      const targetWsId = req.body?.workspaceId ? normalizeWorkspaceId(String(req.body.workspaceId)) : void 0;
+      let targetStore = store;
+      let resolvedWsId = workspaceAls.getStore()?.workspaceId || "default";
+      if (targetWsId) {
+        const specific = getExistingWorkspaceStore(targetWsId);
+        if (specific) {
+          targetStore = specific;
+          resolvedWsId = targetWsId;
+        }
+      } else if (autoDiscover) {
+        for (const wsId of listAllWorkspaceIds()) {
+          const wsStore = getExistingWorkspaceStore(wsId);
+          if (wsStore && wsStore.hasUserWithIdentifier(emailOrIdentifier)) {
+            targetStore = wsStore;
+            resolvedWsId = wsId;
+            break;
+          }
+        }
+      }
+      const result = workspaceAls.run(
+        { workspaceId: resolvedWsId, store: targetStore },
+        () => targetStore.completeCredentialRecovery(
+          { emailOrIdentifier, purpose, code, newSecret, confirmSecret },
+          deviceName
+        )
+      );
+      if (result.terminateSessions) {
+        disconnectUserWebSockets(result.userId, resolvedWsId, "\u062A\u0645\u062A \u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u2014 \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B");
+      }
+      res.json({ ok: true, purpose, workspaceId: resolvedWsId });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+  app.get("/api/public/invitations/:token", (req, res) => {
+    try {
+      const data = store.getPublicInvitationByToken(String(req.params.token));
+      res.status(data.valid ? 200 : 400).json(data);
+    } catch (e) {
+      res.status(400).json({ valid: false, reason: e.message });
+    }
+  });
+  app.post("/api/public/invitations/:token/accept", (req, res) => {
+    try {
+      const result = store.acceptEmployeeInvitation(String(req.params.token), {
+        verificationCode: String(req.body?.verificationCode || ""),
+        password: String(req.body?.password || ""),
+        confirmPassword: String(req.body?.confirmPassword || ""),
+        pin: req.body?.pin ? String(req.body.pin) : void 0,
+        acceptedTerms: Boolean(req.body?.acceptedTerms),
+        deviceName: req.body?.deviceName ? String(req.body.deviceName) : "Web Invite Portal"
+      });
+      broadcastStateChange(result.user.id, `\u062A\u0641\u0639\u064A\u0644 \u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u0648\u0638\u0641 ${result.user.nameAr} \u0639\u0628\u0631 \u0627\u0644\u062F\u0639\u0648\u0629`);
+      res.json({
+        ok: true,
+        user: {
+          id: result.user.id,
+          nameAr: result.user.nameAr,
+          nameEn: result.user.nameEn,
+          email: result.user.email,
+          username: result.user.username,
+          roleLabelAr: result.user.roleLabelAr,
+          accountStatus: result.user.accountStatus
+        },
+        company: result.company
+      });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.use("/api", (req, res, next) => {
+    const fullPath = `/api${req.path}`;
+    if (isPublicApiPath(fullPath)) {
+      return next();
+    }
+    const actor = resolveSessionActor(req);
+    if (!actor) {
+      return res.status(401).json({
+        error: "\u0627\u0646\u062A\u0647\u062A \u0627\u0644\u062C\u0644\u0633\u0629 \u0623\u0648 \u0644\u0645 \u064A\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u2014 \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u0635\u0627\u062F\u0642\u0629 \u0644\u0644\u0645\u062A\u0627\u0628\u0639\u0629",
+        code: "AUTH_REQUIRED"
+      });
+    }
+    req.authActor = actor;
+    next();
+  });
+  app.post("/api/auth/logout-all", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const revokedCount = store.getPersistence().revokeOtherSessionsForUser(actor.userId);
+      disconnectUserWebSockets(
+        actor.userId,
+        actor.workspaceId,
+        "\u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062E\u0631\u0648\u062C \u0645\u0646 \u062C\u0645\u064A\u0639 \u0627\u0644\u0623\u062C\u0647\u0632\u0629 \u0628\u0646\u0627\u0621\u064B \u0639\u0644\u0649 \u0637\u0644\u0628\u0643"
+      );
+      res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
+      res.clearCookie(REFRESH_COOKIE_NAME, { path: "/" });
+      res.json({ ok: true, revokedCount });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.get("/api/auth/me", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const me = store.getAuthMePayload(actor.userId);
+      const userState = store.getStateForUser(actor.userId);
+      res.json({
+        authenticated: true,
+        ...me,
+        sessionId: actor.sessionId,
+        allowedNavs: getAllowedNavsForUser(userState, me.user),
+        landingNav: getRecommendedLandingNav(userState, me.user)
+      });
+    } catch (e) {
+      sendApiError(res, e, 401);
+    }
+  });
+  app.post("/api/auth/credentials", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const targetUserId = String(req.body?.targetUserId || actor.userId);
+      store.updateUserCredentials(
+        actor.userId,
+        targetUserId,
+        {
+          currentPassword: req.body?.currentPassword,
+          newPassword: req.body?.newPassword,
+          newPin: req.body?.newPin
+        },
+        actor.deviceName
+      );
+      res.json({ ok: true, state: store.getStateForUser(actor.userId) });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
   });
   app.get("/api/state", (req, res) => {
-    const { userId } = getActor(req);
-    res.json({
-      state: store.getStateForUser(userId),
-      presence: getPresenceList()
-    });
+    try {
+      const { userId } = getActor(req);
+      res.json({
+        state: store.getStateForUser(userId),
+        presence: getPresenceList()
+      });
+    } catch (e) {
+      res.status(401).json({ error: e.message });
+    }
   });
   app.post("/api/properties", (req, res) => {
     try {
@@ -7780,7 +12221,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u0645\u062A \u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0639\u0642\u0627\u0631 ${property.nameAr}`);
       res.status(201).json({ property, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/units", (req, res) => {
@@ -7790,7 +12231,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u0645\u062A \u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0648\u062D\u062F\u0629 ${unit.unitNumber}`);
       res.status(201).json({ unit, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/units/:id/status", (req, res) => {
@@ -7800,7 +12241,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u063A\u064A\u064A\u0631 \u062D\u0627\u0644\u0629 \u0627\u0644\u0648\u062D\u062F\u0629 ${unit.unitNumber} \u0625\u0644\u0649 ${unit.status}`);
       res.json({ unit, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/units/:id/link-tenant", (req, res) => {
@@ -7810,7 +12251,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0631\u0628\u0637 \u0625\u062F\u0627\u0631\u064A \u0644\u0644\u0648\u062D\u062F\u0629 ${unit.unitNumber}`);
       res.json({ unit, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/tenants", (req, res) => {
@@ -7820,7 +12261,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631 ${tenant.nameAr}`);
       res.status(201).json({ tenant, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.delete("/api/tenants/:id", (req, res) => {
@@ -7830,7 +12271,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062D\u0630\u0641 \u0645\u0644\u0641 \u0645\u0633\u062A\u0623\u062C\u0631`);
       res.json({ ok: true, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/leads", (req, res) => {
@@ -7840,7 +12281,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u0633\u062C\u064A\u0644 \u0639\u0645\u064A\u0644 \u0645\u062D\u062A\u0645\u0644 ${lead.nameAr}`);
       res.status(201).json({ lead, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/contracts", (req, res) => {
@@ -7850,7 +12291,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0642\u062F ${result.contract.internalNumber}`);
       res.status(201).json({ ...result, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/contracts/:id/ejar", (req, res) => {
@@ -7867,7 +12308,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u062A\u0648\u062B\u064A\u0642 \u0627\u0644\u0639\u0642\u062F ${contract.internalNumber}`);
       res.json({ contract, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/handovers", (req, res) => {
@@ -7877,7 +12318,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0646\u0634\u0627\u0621 \u0645\u062D\u0636\u0631 ${handover.type}`);
       res.status(201).json({ handover, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/handovers/:id/approve", (req, res) => {
@@ -7887,7 +12328,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0627\u0639\u062A\u0645\u0627\u062F \u0645\u062D\u0636\u0631 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0648\u0627\u0644\u0625\u062E\u0644\u0627\u0621`);
       res.json({ handover, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/payments", (req, res) => {
@@ -7898,7 +12339,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0635\u062F\u0627\u0631 \u0633\u0646\u062F \u0642\u0628\u0636 ${payment.receiptNumber} (${payment.amount.toLocaleString()} \u0631.\u0633)`);
       res.status(201).json({ payment, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/payments/:id/reverse", (req, res) => {
@@ -7908,7 +12349,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0639\u0643\u0633 \u0627\u0644\u0633\u0646\u062F ${payment.receiptNumber}`);
       res.json({ payment, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/expenses", (req, res) => {
@@ -7918,7 +12359,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u0633\u062C\u064A\u0644 \u0645\u0635\u0631\u0648\u0641 ${expense.expenseNumber}`);
       res.status(201).json({ expense, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/expenses/:id/decision", (req, res) => {
@@ -7928,7 +12369,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0642\u0631\u0627\u0631 \u0627\u0639\u062A\u0645\u0627\u062F \u0627\u0644\u0645\u0635\u0631\u0648\u0641 ${expense.expenseNumber}: ${expense.approvalStatus}`);
       res.json({ expense, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/tickets", (req, res) => {
@@ -7938,7 +12379,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0641\u062A\u062D \u0628\u0644\u0627\u063A \u0635\u064A\u0627\u0646\u0629 ${ticket.ticketNumber}`);
       res.status(201).json({ ticket, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/tickets/:id", (req, res) => {
@@ -7948,7 +12389,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0628\u0644\u0627\u063A \u0627\u0644\u0635\u064A\u0627\u0646\u0629 ${ticket.ticketNumber}`);
       res.json({ ticket, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/tasks", (req, res) => {
@@ -7958,7 +12399,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0636\u0627\u0641\u0629 \u0645\u0647\u0645\u0629: ${task.title}`);
       res.status(201).json({ task, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/tasks/:id", (req, res) => {
@@ -7968,7 +12409,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0645\u0647\u0645\u0629: ${task.title}`);
       res.json({ task, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/tasks/:id/reassign", (req, res) => {
@@ -7984,7 +12425,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u062D\u0648\u064A\u0644 \u0645\u0647\u0645\u0629: ${task.title}`);
       res.json({ task, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/tasks/:id/review", (req, res) => {
@@ -8000,7 +12441,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0645\u0631\u0627\u062C\u0639\u0629 \u0648\u0627\u0639\u062A\u0645\u0627\u062F \u0645\u0647\u0645\u0629: ${task.title}`);
       res.json({ task, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/communications", (req, res) => {
@@ -8010,7 +12451,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u0633\u062C\u064A\u0644 \u062A\u0648\u0627\u0635\u0644 \u0645\u0639 ${log.targetName}`);
       res.status(201).json({ log, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/documents", (req, res) => {
@@ -8020,7 +12461,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0623\u0631\u0634\u0641\u0629 \u0645\u0633\u062A\u0646\u062F ${doc.title}`);
       res.status(201).json({ doc, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/vendors", (req, res) => {
@@ -8030,7 +12471,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0645\u0648\u0631\u062F ${vendor.nameAr}`);
       res.status(201).json({ vendor, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/permissions/toggle", (req, res) => {
@@ -8055,22 +12496,28 @@ function handleApi(app) {
   app.post("/api/backups", (req, res) => {
     try {
       const { userId, deviceName } = getActor(req);
-      const backup = store.createBackup(userId, req.body.label, deviceName);
+      const backup = store.createBackup(
+        userId,
+        req.body.label,
+        deviceName,
+        req.body?.encryptPassword ? String(req.body.encryptPassword) : void 0
+      );
       broadcastStateChange(userId, `\u0625\u0646\u0634\u0627\u0621 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629`);
       res.status(201).json({ backup, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/backups/:id/restore", (req, res) => {
     try {
       const { userId, deviceName } = getActor(req);
       const mode = req.body?.mode === "merge" ? "merge" : "replace";
-      const restored = store.restoreBackup(userId, String(req.params.id), deviceName, mode);
+      const password = req.body?.password ? String(req.body.password) : void 0;
+      store.restoreBackup(userId, String(req.params.id), deviceName, mode, password);
       broadcastStateChange(userId, `\u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 (${mode === "merge" ? "\u062F\u0645\u062C \u0630\u0643\u064A" : "\u0627\u0633\u062A\u0628\u062F\u0627\u0644 \u0643\u0627\u0645\u0644"})`);
-      res.json({ ok: true, mode, state: restored });
+      res.json({ ok: true, mode, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/reminders/rules", (req, res) => {
@@ -8080,7 +12527,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0636\u0627\u0641\u0629 \u0642\u0627\u0639\u062F\u0629 \u062C\u062F\u0648\u0644\u0629 \u062A\u0646\u0628\u064A\u0647 \u0625\u064A\u062C\u0627\u0631: ${rule.nameAr}`);
       res.status(201).json({ rule, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/reminders/rules/:id", (req, res) => {
@@ -8090,7 +12537,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u062C\u062F\u0648\u0644\u0629 \u0627\u0644\u062A\u0646\u0628\u064A\u0647 ${rule.nameAr}`);
       res.json({ rule, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.delete("/api/reminders/rules/:id", (req, res) => {
@@ -8100,7 +12547,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062D\u0630\u0641 \u0642\u0627\u0639\u062F\u0629 \u062A\u0646\u0628\u064A\u0647 \u0625\u064A\u062C\u0627\u0631`);
       res.json({ ok: true, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/reminders/run", (req, res) => {
@@ -8110,7 +12557,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u0634\u063A\u064A\u0644 \u062A\u0646\u0628\u064A\u0647\u0627\u062A \u0627\u0644\u0625\u064A\u062C\u0627\u0631 (${logs.length} \u0625\u0634\u0639\u0627\u0631 \u0645\u0631\u0633\u0644)`);
       res.json({ logs, count: logs.length, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/companies", (req, res) => {
@@ -8120,7 +12567,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0634\u0631\u0643\u0629 ${company.nameAr}`);
       res.status(201).json({ company, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/settings", (req, res) => {
@@ -8130,7 +12577,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0645\u0646\u0634\u0623\u0629 \u0648\u0627\u0644\u0639\u0645\u0644\u0627\u062A`);
       res.json({ settings, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/documents/ocr", async (req, res) => {
@@ -8166,7 +12613,7 @@ function handleApi(app) {
       }
       res.json({ ...result, matches });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/documents/sync-ocr", (req, res) => {
@@ -8191,7 +12638,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0631\u0628\u0637 \u0646\u062A\u0627\u0626\u062C OCR \u0628\u062D\u0642\u0648\u0644 \u0627\u0644\u0645\u0633\u062A\u0623\u062C\u0631\u064A\u0646 \u0648\u0627\u0644\u0639\u0642\u0627\u0631\u0627\u062A`);
       res.json({ ...synced, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/documents/:id/access", (req, res) => {
@@ -8201,7 +12648,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0633\u062C\u0644 \u0648\u0635\u0648\u0644 \u0644\u0644\u0645\u0633\u062A\u0646\u062F ${doc.title}`);
       res.json({ doc, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/documents/:id/ocr", async (req, res) => {
@@ -8238,7 +12685,7 @@ function handleApi(app) {
         state: store.getStateForUser(userId)
       });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/owners/:id/transfer", (req, res) => {
@@ -8248,7 +12695,7 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u062A\u062D\u0648\u064A\u0644 \u0645\u0633\u062A\u062D\u0642\u0627\u062A \u0644\u0644\u0645\u0627\u0644\u0643 ${result.owner.nameAr}`);
       res.status(201).json({ ...result, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.post("/api/contracts/:id/renew", (req, res) => {
@@ -8379,27 +12826,280 @@ function handleApi(app) {
       broadcastStateChange(userId, `\u0625\u0636\u0627\u0641\u0629 \u0645\u0648\u0638\u0641 \u062C\u062F\u064A\u062F: ${user.nameAr}`);
       res.status(201).json({ user, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/team/users/:id", (req, res) => {
     try {
-      const { userId, deviceName } = getActor(req);
+      const { userId, deviceName, workspaceId } = getActor(req);
       const user = store.updateStaffUser(userId, String(req.params.id), req.body, deviceName);
+      if (req.body?.active === false) {
+        store.getPersistence().revokeOtherSessionsForUser(user.id);
+        disconnectUserWebSockets(user.id, workspaceId, "\u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062D\u0633\u0627\u0628 \u0628\u0648\u0627\u0633\u0637\u0629 \u0627\u0644\u0625\u062F\u0627\u0631\u0629");
+      }
       broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u0641 \u0627\u0644\u0645\u0648\u0638\u0641: ${user.nameAr}`);
       res.json({ user, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
     }
   });
   app.delete("/api/team/users/:id", (req, res) => {
     try {
-      const { userId, deviceName } = getActor(req);
-      const result = store.deleteStaffUser(userId, String(req.params.id), deviceName);
+      const { userId, deviceName, workspaceId } = getActor(req);
+      const targetId = String(req.params.id);
+      const result = store.deleteStaffUser(userId, targetId, deviceName);
+      store.getPersistence().revokeOtherSessionsForUser(targetId);
+      disconnectUserWebSockets(targetId, workspaceId, "\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u062D\u0633\u0627\u0628 \u0628\u0648\u0627\u0633\u0637\u0629 \u0645\u0627\u0644\u0643 \u0627\u0644\u0646\u0638\u0627\u0645");
       broadcastStateChange(userId, "\u062D\u0630\u0641 \u062D\u0633\u0627\u0628 \u0645\u0633\u062A\u062E\u062F\u0645");
       res.json({ ...result, state: store.getStateForUser(userId) });
     } catch (e) {
-      res.status(400).json({ error: e.message });
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/team/employees", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const originHeader = req.headers.origin;
+      const hostHeader = req.headers.host;
+      const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+      const originUrl = typeof originHeader === "string" && originHeader.startsWith("http") ? originHeader : hostHeader ? `${proto}://${hostHeader}` : "http://localhost:3000";
+      const result = store.createEmployeeWithInvite(userId, req.body, originUrl, deviceName);
+      broadcastStateChange(userId, `\u0625\u0636\u0627\u0641\u0629 \u0645\u0648\u0638\u0641 \u0648\u062F\u0639\u0648\u0629 \u0627\u0646\u0636\u0645\u0627\u0645: ${result.user.nameAr}`);
+      res.status(201).json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.patch("/api/team/employees/:id", (req, res) => {
+    try {
+      const { userId, deviceName, workspaceId } = getActor(req);
+      const result = store.updateEmployeeAdmin(userId, String(req.params.id), req.body, deviceName);
+      if (result.terminateSessions) {
+        disconnectUserWebSockets(
+          result.user.id,
+          workspaceId,
+          `\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u062D\u0627\u0644\u0629 \u0627\u0644\u062D\u0633\u0627\u0628 \u0625\u0644\u0649 (${result.user.accountStatus || "\u0645\u0648\u0642\u0648\u0641"})`
+        );
+      }
+      broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u0641 \u0627\u0644\u0645\u0648\u0638\u0641: ${result.user.nameAr}`);
+      res.json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/team/invitations/:id/resend", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const originHeader = req.headers.origin;
+      const hostHeader = req.headers.host;
+      const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+      const originUrl = typeof originHeader === "string" && originHeader.startsWith("http") ? originHeader : hostHeader ? `${proto}://${hostHeader}` : "http://localhost:3000";
+      const result = store.resendEmployeeInvitation(
+        userId,
+        String(req.params.id),
+        req.body?.channel,
+        originUrl,
+        deviceName
+      );
+      broadcastStateChange(userId, `\u0625\u0639\u0627\u062F\u0629 \u0625\u0631\u0633\u0627\u0644 \u062F\u0639\u0648\u0629 ${result.invitation.fullName}`);
+      res.json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/team/invitations/:id/cancel", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const invitation = store.cancelEmployeeInvitation(userId, String(req.params.id), deviceName);
+      broadcastStateChange(userId, `\u0625\u0644\u063A\u0627\u0621 \u062F\u0639\u0648\u0629 ${invitation.fullName}`);
+      res.json({ invitation, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/roles", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const role = store.createCustomRole(userId, req.body, deviceName);
+      broadcastStateChange(userId, `\u0625\u0646\u0634\u0627\u0621 \u062F\u0648\u0631 \u0645\u062E\u0635\u0635: ${role.nameAr}`);
+      res.status(201).json({ role, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.patch("/api/roles/:id", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const role = store.updateCustomRole(userId, String(req.params.id), req.body, deviceName);
+      broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u062F\u0648\u0631 \u0627\u0644\u0645\u062E\u0635\u0635: ${role.nameAr}`);
+      res.json({ role, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.delete("/api/roles/:id", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const result = store.deleteCustomRole(userId, String(req.params.id), deviceName);
+      broadcastStateChange(userId, "\u062D\u0630\u0641 \u062F\u0648\u0631 \u0645\u062E\u0635\u0635");
+      res.json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/roles/module-matrix", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const result = store.updateRoleModuleMatrix(
+        userId,
+        req.body?.role,
+        req.body?.modulePermissions || {},
+        deviceName
+      );
+      broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0645\u0635\u0641\u0648\u0641\u0629 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A \u0644\u0644\u062F\u0648\u0631 ${req.body?.role}`);
+      res.json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.get("/api/profile/sessions", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const sessions = store.getPersistence().listActiveSessionsForUser(actor.userId, actor.rawToken);
+      res.json({ sessions });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.delete("/api/profile/sessions/:sessionId", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const sessionId = String(req.params.sessionId);
+      const revoked = store.getPersistence().revokeSessionById(actor.userId, sessionId);
+      disconnectUserWebSockets(
+        actor.userId,
+        actor.workspaceId,
+        "\u062A\u0645 \u0625\u0646\u0647\u0627\u0621 \u0647\u0630\u0647 \u0627\u0644\u062C\u0644\u0633\u0629 \u0645\u0646 \u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0634\u062E\u0635\u064A",
+        sessionId
+      );
+      const sessions = store.getPersistence().listActiveSessionsForUser(actor.userId, actor.rawToken);
+      res.json({ ok: true, revoked, sessions });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.patch("/api/profile/me", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const user = store.updateOwnProfile(userId, req.body || {}, deviceName);
+      broadcastStateChange(userId, `\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0634\u062E\u0635\u064A: ${user.nameAr}`);
+      res.json({ user, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/profile/verify-contact/request", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const type = req.body?.type === "phone" ? "phone" : "email";
+      const newValue = String(req.body?.newValue || "");
+      const result = store.requestContactVerification(userId, type, newValue, deviceName);
+      res.json({ ...result, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/profile/verify-contact/confirm", (req, res) => {
+    try {
+      const { userId, deviceName } = getActor(req);
+      const type = req.body?.type === "phone" ? "phone" : "email";
+      const code = String(req.body?.code || "");
+      const user = store.confirmContactVerification(userId, type, code, deviceName);
+      broadcastStateChange(userId, `\u062A\u0623\u0643\u064A\u062F \u062A\u062D\u062F\u064A\u062B \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0644\u0644\u0645\u0648\u0638\u0641 ${user.nameAr}`);
+      res.json({ ok: true, user, state: store.getStateForUser(userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/profile/change-credentials", (req, res) => {
+    try {
+      const actor = getActor(req);
+      store.updateUserCredentials(
+        actor.userId,
+        actor.userId,
+        {
+          currentPassword: req.body?.currentPassword,
+          currentPin: req.body?.currentPin,
+          newPassword: req.body?.newPassword,
+          newPin: req.body?.newPin
+        },
+        actor.deviceName
+      );
+      if (req.body?.newPassword) {
+        store.getPersistence().revokeOtherSessionsForUser(actor.userId, actor.rawToken);
+        disconnectUserWebSockets(
+          actor.userId,
+          actor.workspaceId,
+          "\u062A\u0645 \u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u2014 \u062A\u0645 \u0625\u0646\u0647\u0627\u0621 \u0627\u0644\u062C\u0644\u0633\u0627\u062A \u0627\u0644\u0623\u062E\u0631\u0649 \u0644\u062F\u0648\u0627\u0639\u064A \u0627\u0644\u0623\u0645\u0627\u0646",
+          void 0,
+          actor.sessionId
+        );
+      }
+      res.json({ ok: true, state: store.getStateForUser(actor.userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/profile/pin-toggle", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const enabled = Boolean(req.body?.enabled);
+      const currentPassword = String(req.body?.currentPassword || "");
+      const newPin = req.body?.newPin ? String(req.body.newPin) : void 0;
+      const user = store.togglePinEnabled(actor.userId, enabled, currentPassword, newPin, actor.deviceName);
+      res.json({ ok: true, user, state: store.getStateForUser(actor.userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.post("/api/profile/two-factor", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const enabled = Boolean(req.body?.enabled);
+      const currentPassword = String(req.body?.currentPassword || "");
+      const user = store.toggleTwoFactor(actor.userId, enabled, currentPassword, actor.deviceName);
+      if (enabled && req.body?.deviceId) {
+        store.getPersistence().registerOrTouchTrustedDevice(
+          actor.userId,
+          String(req.body.deviceId),
+          String(req.body?.deviceName || actor.deviceName || "Web Terminal"),
+          req.body?.appType === "desktop" ? "desktop" : "web"
+        );
+      }
+      res.json({ ok: true, user, state: store.getStateForUser(actor.userId) });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.get("/api/profile/trusted-devices", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const currentDeviceId = typeof req.headers["x-device-id"] === "string" ? req.headers["x-device-id"] : void 0;
+      const devices = store.getPersistence().listTrustedDevices(actor.userId, currentDeviceId);
+      res.json({ devices });
+    } catch (e) {
+      sendApiError(res, e, 400);
+    }
+  });
+  app.delete("/api/profile/trusted-devices/:id", (req, res) => {
+    try {
+      const actor = getActor(req);
+      const revoked = store.getPersistence().revokeTrustedDevice(actor.userId, String(req.params.id));
+      const currentDeviceId = typeof req.headers["x-device-id"] === "string" ? req.headers["x-device-id"] : void 0;
+      const devices = store.getPersistence().listTrustedDevices(actor.userId, currentDeviceId);
+      res.json({ ok: true, revoked, devices });
+    } catch (e) {
+      sendApiError(res, e, 400);
     }
   });
   app.patch("/api/team/security-policy", (req, res) => {
@@ -8520,7 +13220,17 @@ function handleApi(app) {
   });
   app.get("/api/backups/:id/preview", (req, res) => {
     try {
-      const preview = store.previewBackup(String(req.params.id));
+      const password = req.query.password ? String(req.query.password) : void 0;
+      const preview = store.previewBackup(String(req.params.id), password);
+      res.json(preview);
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+  app.post("/api/backups/:id/preview", (req, res) => {
+    try {
+      const password = req.body?.password ? String(req.body.password) : void 0;
+      const preview = store.previewBackup(String(req.params.id), password);
       res.json(preview);
     } catch (e) {
       res.status(400).json({ error: e.message });
@@ -8834,12 +13544,18 @@ function handleApi(app) {
       const errors = [];
       for (const op of operations) {
         if (!op || typeof op.endpoint !== "string" || !op.endpoint.startsWith("/api/")) continue;
+        const operationId = String(op.operationId || op.idempotencyKey || "");
+        const opMethod = op.method === "PATCH" ? "PATCH" : op.method === "DELETE" ? "DELETE" : "POST";
         const evalRes = store.evaluateSyncOperationConflict(
-          op.userId || userId,
+          userId,
           {
-            idempotencyKey: String(op.idempotencyKey || ""),
-            method: op.method === "PATCH" ? "PATCH" : "POST",
+            operationId,
+            idempotencyKey: String(op.idempotencyKey || operationId),
+            method: opMethod,
             endpoint: op.endpoint,
+            entityType: op.entityType ? String(op.entityType) : void 0,
+            entityId: op.entityId ? String(op.entityId) : void 0,
+            baseRevision: typeof op.baseRevision === "number" ? op.baseRevision : void 0,
             descriptionAr: String(op.descriptionAr || ""),
             queuedAt: String(op.queuedAt || (/* @__PURE__ */ new Date()).toISOString()),
             deviceName: op.deviceName || deviceName
@@ -8853,25 +13569,30 @@ function handleApi(app) {
         if (evalRes.conflict) {
           newConflicts.push(evalRes.conflict);
         }
-        try {
-          const resp = await fetch(`http://127.0.0.1:${PORT}${op.endpoint}`, {
-            method: op.method === "PATCH" ? "PATCH" : "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-user-id": op.userId || userId,
-              "x-device-name": encodeURIComponent(op.deviceName || deviceName),
-              "x-idempotency-key": String(op.idempotencyKey || "")
-            },
-            body: op.body !== void 0 ? JSON.stringify(op.body) : void 0
-          });
-          if (!resp.ok) {
-            const errJson = await resp.json().catch(() => ({}));
-            errors.push(`${op.descriptionAr || op.endpoint}: ${errJson.error || resp.status}`);
-          } else {
-            uploaded += 1;
+        const dispatchRes = dispatchSyncOperation(store, {
+          method: opMethod,
+          endpoint: op.endpoint,
+          body: op.body && typeof op.body === "object" ? op.body : {},
+          userId,
+          deviceName: op.deviceName || deviceName,
+          idempotencyKey: String(op.idempotencyKey || operationId),
+          operationId
+        });
+        if (!dispatchRes.ok) {
+          errors.push(`${op.descriptionAr || op.endpoint}: ${String(dispatchRes.data?.error || dispatchRes.status)}`);
+        } else {
+          if (operationId) {
+            store.recordSyncOperationResult(
+              operationId,
+              userId,
+              opMethod,
+              op.endpoint,
+              dispatchRes.data,
+              dispatchRes.entityType,
+              dispatchRes.entityId
+            );
           }
-        } catch (err) {
-          errors.push(`${op.descriptionAr || op.endpoint}: ${err.message}`);
+          uploaded += 1;
         }
       }
       if (uploaded > 0 || newConflicts.length > 0) {
@@ -9007,56 +13728,70 @@ async function startServer(customPort) {
     console.error("WebSocketServer error:", err.message);
   });
   wss.on("connection", (ws, req) => {
-    const sessionId = `ses-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const fallbackSessionId = `ses-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const ipAddress = extractClientIp(req);
+    const workspaceId = resolveRequestWorkspaceId(req);
+    const wsStore = getExistingWorkspaceStore(workspaceId);
+    const upgradeActor = wsStore ? resolveSessionActor(req) : null;
     activeSessions.set(ws, {
       ws,
-      sessionId,
-      userId: "usr-gm",
-      deviceName: "Web Browser",
+      workspaceId,
+      sessionId: upgradeActor?.sessionId || fallbackSessionId,
+      userId: upgradeActor?.userId || "",
+      authenticated: Boolean(upgradeActor),
+      deviceName: upgradeActor?.deviceName || "Web Browser",
       ipAddress,
       connectedAt: (/* @__PURE__ */ new Date()).toISOString()
     });
+    if (upgradeActor && wsStore) {
+      ws.send(
+        JSON.stringify({
+          type: "state:init",
+          state: wsStore.getStateForUser(upgradeActor.userId),
+          presence: getPresenceList(workspaceId)
+        })
+      );
+      broadcastPresence(workspaceId);
+    }
     ws.on("message", (raw) => {
       try {
         const msg = JSON.parse(String(raw));
         if (msg.type === "session:identify") {
           const prev = activeSessions.get(ws);
-          const nextUserId = String(msg.userId || "usr-gm");
-          const nextDevice = String(msg.deviceName || "Web Browser");
-          const shouldLogLogin = !prev || prev.userId !== nextUserId;
+          const msgWsId = prev?.workspaceId || workspaceId;
+          const activeWsStore = getExistingWorkspaceStore(msgWsId);
+          const verifiedActor = activeWsStore ? resolveSessionActor(req, typeof msg.token === "string" ? msg.token : void 0) : null;
+          if (!verifiedActor || !activeWsStore) {
+            ws.send(JSON.stringify({ type: "auth:required", error: "\u062C\u0644\u0633\u0629 WebSocket \u063A\u064A\u0631 \u0645\u0635\u0631\u062D \u0628\u0647\u0627" }));
+            return;
+          }
+          const nextDevice = String(msg.deviceName || verifiedActor.deviceName || "Web Browser");
           activeSessions.set(ws, {
             ws,
-            sessionId: prev?.sessionId || sessionId,
-            userId: nextUserId,
+            workspaceId: msgWsId,
+            sessionId: verifiedActor.sessionId || prev?.sessionId || fallbackSessionId,
+            userId: verifiedActor.userId,
+            authenticated: true,
             deviceName: nextDevice,
             ipAddress,
             connectedAt: prev?.connectedAt || (/* @__PURE__ */ new Date()).toISOString()
           });
-          if (shouldLogLogin) {
-            store.recordLoginEvent({
-              userId: nextUserId,
-              deviceName: nextDevice,
-              ipAddress,
-              method: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631",
-              success: true
-            });
-          }
           ws.send(
             JSON.stringify({
               type: "state:init",
-              state: store.getStateForUser(nextUserId),
-              presence: getPresenceList()
+              state: activeWsStore.getStateForUser(verifiedActor.userId),
+              presence: getPresenceList(msgWsId)
             })
           );
-          broadcastPresence();
+          broadcastPresence(msgWsId);
         }
       } catch {
       }
     });
     ws.on("close", () => {
+      const closed = activeSessions.get(ws);
       activeSessions.delete(ws);
-      broadcastPresence();
+      broadcastPresence(closed?.workspaceId || workspaceId);
     });
   });
   if (process.env.NODE_ENV !== "production") {
@@ -9067,14 +13802,20 @@ async function startServer(customPort) {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = process.env.AQARPLUS_DIST_DIR ? path2.resolve(process.env.AQARPLUS_DIST_DIR) : path2.resolve(process.cwd(), "dist");
+    const distDir = process.env.AQARPLUS_DIST_DIR ? path3.resolve(process.env.AQARPLUS_DIST_DIR) : path3.resolve(process.cwd(), "dist");
     app.use(express.static(distDir));
     app.get("*", (_req, res) => {
-      res.sendFile(path2.join(distDir, "index.html"));
+      res.sendFile(path3.join(distDir, "index.html"));
     });
   }
   server.on("error", (err) => {
     console.error("HTTP Server error:", err);
+  });
+  server.on("close", () => {
+    for (const st of workspaceStores.values()) {
+      st.getPersistence().close();
+    }
+    workspaceStores.clear();
   });
   await new Promise((resolve) => {
     server.listen(listenPort, "0.0.0.0", () => {
